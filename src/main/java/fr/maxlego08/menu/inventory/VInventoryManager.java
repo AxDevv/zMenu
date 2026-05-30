@@ -8,12 +8,17 @@ import fr.maxlego08.menu.api.engine.ItemButton;
 import fr.maxlego08.menu.api.exceptions.InventoryAlreadyExistException;
 import fr.maxlego08.menu.api.exceptions.InventoryOpenException;
 import fr.maxlego08.menu.api.players.inventory.InventoriesPlayer;
+import fr.maxlego08.menu.api.players.inventory.InventoryPlayer;
 import fr.maxlego08.menu.api.utils.CompatibilityUtil;
+import fr.maxlego08.menu.api.utils.ClearInvType;
 import fr.maxlego08.menu.api.utils.EnumInventory;
 import fr.maxlego08.menu.api.utils.Message;
+import fr.maxlego08.menu.common.utils.nms.ItemStackUtils;
+import fr.maxlego08.menu.common.utils.nms.NMSUtils;
 import fr.maxlego08.menu.inventory.inventories.InventoryDefault;
 import fr.maxlego08.menu.listener.ListenerAdapter;
 import org.bukkit.Bukkit;
+import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -31,6 +36,9 @@ import java.util.*;
 import java.util.function.Predicate;
 
 public class VInventoryManager extends ListenerAdapter implements VInvManager {
+
+    private static final int PLAYER_STORAGE_SIZE = 36;
+    private static final int OFF_HAND_SLOT = 40;
 
     private final Map<Integer, VInventory> inventories = new HashMap<>();
     private final ZMenuPlugin plugin;
@@ -205,23 +213,78 @@ public class VInventoryManager extends ListenerAdapter implements VInvManager {
             if (vInventory instanceof InventoryDefault inventoryDefault) {
                 fr.maxlego08.menu.api.Inventory menu = inventoryDefault.getMenuInventory();
                 if (menu != null && menu.cleanInventory()) {
-                    event.getDrops().clear();
                     InventoriesPlayer inventoriesPlayer = plugin.getInventoriesPlayer();
-                    List<ItemStack> savedItems = inventoriesPlayer.getInventory(player.getUniqueId());
-                    inventoriesPlayer.clearInventorie(player.getUniqueId());
-                    if (event.getKeepInventory()) {
-                        player.getInventory().clear();
-                        for (ItemStack itemStack : savedItems) {
-                            if (itemStack != null) {
-                                player.getInventory().addItem(itemStack);
-                            }
-                        }
+                    Optional<InventoryPlayer> savedInventory = inventoriesPlayer.getPlayerInventory(player.getUniqueId());
+                    if (savedInventory.isEmpty()) {
                         return;
                     }
-                    event.getDrops().addAll(savedItems);
+                    InventoryPlayer inventoryPlayer = savedInventory.get();
+                    if (menu.getClearInvType() == ClearInvType.PACKET_EVENT) {
+                        inventoriesPlayer.clearInventorie(player.getUniqueId());
+                        return;
+                    }
+
+                    inventoriesPlayer.clearInventorie(player.getUniqueId());
+                    if (event.getKeepInventory()) {
+                        event.getDrops().clear();
+                        restoreSavedInventory(player, inventoryPlayer);
+                        return;
+                    }
+
+                    List<ItemStack> armorDrops = getStoredArmor(player);
+                    event.getDrops().clear();
+                    addSavedDrops(event.getDrops(), inventoryPlayer);
+                    event.getDrops().addAll(armorDrops);
                 }
             }
         }
+    }
+
+    private void restoreSavedInventory(Player player, InventoryPlayer inventoryPlayer) {
+        org.bukkit.inventory.PlayerInventory playerInventory = player.getInventory();
+        for (int slot = 0; slot < PLAYER_STORAGE_SIZE; slot++) {
+            playerInventory.clear(slot);
+        }
+        if (!NMSUtils.isOneHand()) {
+            playerInventory.clear(OFF_HAND_SLOT);
+        }
+
+        inventoryPlayer.getItems().forEach((slot, encodedItemStack) -> {
+            if (!isManagedPlayerSlot(slot)) {
+                return;
+            }
+            ItemStack itemStack = ItemStackUtils.deserializeItemStack(encodedItemStack);
+            if (isRealItem(itemStack)) {
+                playerInventory.setItem(slot, itemStack);
+            }
+        });
+    }
+
+    private void addSavedDrops(List<ItemStack> drops, InventoryPlayer inventoryPlayer) {
+        inventoryPlayer.getItems().values().forEach(encodedItemStack -> {
+            ItemStack itemStack = ItemStackUtils.deserializeItemStack(encodedItemStack);
+            if (isRealItem(itemStack)) {
+                drops.add(itemStack);
+            }
+        });
+    }
+
+    private List<ItemStack> getStoredArmor(Player player) {
+        List<ItemStack> armorDrops = new ArrayList<>();
+        for (ItemStack itemStack : player.getInventory().getArmorContents()) {
+            if (isRealItem(itemStack)) {
+                armorDrops.add(itemStack.clone());
+            }
+        }
+        return armorDrops;
+    }
+
+    private boolean isManagedPlayerSlot(int slot) {
+        return slot >= 0 && slot < PLAYER_STORAGE_SIZE || !NMSUtils.isOneHand() && slot == OFF_HAND_SLOT;
+    }
+
+    private boolean isRealItem(ItemStack itemStack) {
+        return itemStack != null && itemStack.getType() != Material.AIR;
     }
 
     /**

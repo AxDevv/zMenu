@@ -16,7 +16,9 @@ import java.util.List;
 import java.util.Map;
 
 public class ZInventoryPlayer implements InventoryPlayer {
-    private final int MAX_INVENTORY_SIZE = 36;
+    private static final int MAX_INVENTORY_SIZE = 36;
+    private static final int OFF_HAND_SLOT = 40;
+
     private final Map<Integer, String> items = new HashMap<>();
     private final ZMenuPlugin plugin;
     private boolean temporary = false;
@@ -38,7 +40,7 @@ public class ZInventoryPlayer implements InventoryPlayer {
             clear(slot, playerInventory, content,!temporary, player);
         }
         if (!NMSUtils.isOneHand()) {
-            clear(40, playerInventory, content,!temporary, player);
+            clear(OFF_HAND_SLOT, playerInventory, content,!temporary, player);
         }
     }
 
@@ -60,15 +62,22 @@ public class ZInventoryPlayer implements InventoryPlayer {
     @Override
     public void forceGiveInventory(@NonNull Player player) {
         PlayerInventory playerInventory = player.getInventory();
-        for (int slot = 0; slot <= MAX_INVENTORY_SIZE; slot++) {
-            if (items.containsKey(slot)) {
-                playerInventory.setItem(slot, ItemStackUtils.deserializeItemStack(items.get(slot)));
-            } else {
-                ItemStack itemStack = playerInventory.getItem(slot);
-                if (itemStack != null && this.plugin.getDupeManager().isDupeItem(itemStack)) {
-                    playerInventory.setItem(slot, null);
-                }
-            }
+        for (int slot = 0; slot != MAX_INVENTORY_SIZE; slot++) {
+            forceGiveSlot(playerInventory, slot);
+        }
+        if (!NMSUtils.isOneHand()) {
+            forceGiveSlot(playerInventory, OFF_HAND_SLOT);
+        }
+    }
+
+    private void forceGiveSlot(PlayerInventory playerInventory, int slot) {
+        if (items.containsKey(slot)) {
+            playerInventory.setItem(slot, ItemStackUtils.deserializeItemStack(items.get(slot)));
+            return;
+        }
+        ItemStack itemStack = playerInventory.getItem(slot);
+        if (itemStack != null && this.plugin.getDupeManager().isDupeItem(itemStack)) {
+            playerInventory.setItem(slot, null);
         }
     }
 
