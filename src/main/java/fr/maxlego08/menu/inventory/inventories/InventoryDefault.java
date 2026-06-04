@@ -146,7 +146,7 @@ public class InventoryDefault extends VInventory implements InventoryEngine {
             if (isAsync) {
                 scheduler.runAtEntity(player, w2 -> {
                     player.openInventory(this.getSpigotInventory());
-                    resyncInventoryViewSlot(player, RAW_SLOT_VISUAL_RESYNC);
+                    resyncInventoryViewSlotNextTick(this.plugin, player, RAW_SLOT_VISUAL_RESYNC);
                 });
             }
         };

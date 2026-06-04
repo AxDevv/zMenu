@@ -273,6 +273,10 @@ public abstract class ZUtils extends MessageUtils {
         view.setItem(rawSlot, view.getItem(rawSlot));
     }
 
+    protected void resyncInventoryViewSlotNextTick(MenuPlugin plugin, Player player, int rawSlot) {
+        plugin.getScheduler().runAtEntityLater(player, task -> resyncInventoryViewSlot(player, rawSlot), 1);
+    }
+
     /**
      * Checks if the given permissible has the specified permission.
      *

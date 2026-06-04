@@ -113,7 +113,7 @@ public class VInventoryManager extends ListenerAdapter implements VInvManager {
 
                 Inventory spigotInventory = clonedInventory.getSpigotInventory();
                 player.openInventory(spigotInventory);
-                resyncInventoryViewSlot(player, RAW_SLOT_VISUAL_RESYNC);
+                resyncInventoryViewSlotNextTick(this.plugin, player, RAW_SLOT_VISUAL_RESYNC);
 
                 this.plugin.getInventoryManager().getInventoryListeners().forEach(listener -> listener.onInventoryPostOpen(player, clonedInventory));
 
