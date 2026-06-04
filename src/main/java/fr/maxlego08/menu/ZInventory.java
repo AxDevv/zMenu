@@ -230,7 +230,7 @@ public class ZInventory extends ZUtils implements Inventory {
             clearPlayerInventoryButtons(player, inventoryHolder);
 
             if (inventoryHolder.getMenuInventory().cleanInventory() && !this.clearInventory) {
-                inventoriesPlayer.giveInventory(player);
+                restoreInventoryAfterOpen(player, inventoriesPlayer);
             } else if (this.clearInventory) {
                 if (this.clearInvType == ClearInvType.DEFAULT){
                     inventoriesPlayer.storeInventory(player);
@@ -252,12 +252,20 @@ public class ZInventory extends ZUtils implements Inventory {
         return InventoryResult.SUCCESS;
     }
 
+    private void restoreInventoryAfterOpen(Player player, InventoriesPlayer inventoriesPlayer) {
+        ZMenuPlugin.getInstance().getScheduler().runAtEntityLater(player, task -> {
+            inventoriesPlayer.giveInventory(player);
+            player.updateInventory();
+        }, 1);
+    }
+
     private void clearPlayerInventoryButtons(Player player, InventoryEngine inventoryDefault) {
+        ClearInvType clearInvType = inventoryDefault.getMenuInventory().getClearInvType();
         for (Button button : inventoryDefault.getButtons()) {
             if (button.isPlayerInventory()) {
                 for (int slot : button.getSlots()) {
                     if (slot >= 0 && slot <= 36) {
-                        this.clearInvType.getOnButtonClear().accept(player, slot);
+                        clearInvType.getOnButtonClear().accept(player, slot);
                     }
                 }
             }
