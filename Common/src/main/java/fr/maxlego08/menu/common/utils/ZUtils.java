@@ -20,6 +20,7 @@ import org.bukkit.command.SimpleCommandMap;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
@@ -41,6 +42,7 @@ import java.util.regex.Pattern;
 @SuppressWarnings("deprecation")
 public abstract class ZUtils extends MessageUtils {
     private static final Timer TIMER = new Timer();
+    protected static final int RAW_SLOT_VISUAL_RESYNC = 45;
     // For plugin support from 1.8 to 1.12
     private static Material[] byId;
 
@@ -261,6 +263,14 @@ public abstract class ZUtils extends MessageUtils {
      */
     protected void createInventory(MenuPlugin plugin, Player player, EnumInventory inventory, int page, Object... objects) {
         plugin.getVInventoryManager().createInventory(inventory, player, page, objects);
+    }
+
+    protected void resyncInventoryViewSlot(Player player, int rawSlot) {
+        InventoryView view = player.getOpenInventory();
+        if (rawSlot < 0 || rawSlot >= view.countSlots()) {
+            return;
+        }
+        view.setItem(rawSlot, view.getItem(rawSlot));
     }
 
     /**
