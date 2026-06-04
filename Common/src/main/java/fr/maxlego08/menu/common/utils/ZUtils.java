@@ -20,6 +20,7 @@ import org.bukkit.command.SimpleCommandMap;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
@@ -267,10 +268,19 @@ public abstract class ZUtils extends MessageUtils {
 
     protected void resyncInventoryViewSlot(Player player, int rawSlot) {
         InventoryView view = player.getOpenInventory();
-        if (rawSlot < 0 || rawSlot >= view.countSlots()) {
-            return;
+        boolean changed = false;
+        if (rawSlot >= 0 && rawSlot < view.countSlots()) {
+            view.setItem(rawSlot, view.getItem(rawSlot));
+            changed = true;
         }
-        view.setItem(rawSlot, view.getItem(rawSlot));
+        Inventory topInventory = view.getTopInventory();
+        if (rawSlot >= 0 && rawSlot < topInventory.getSize()) {
+            topInventory.setItem(rawSlot, topInventory.getItem(rawSlot));
+            changed = true;
+        }
+        if (changed) {
+            player.updateInventory();
+        }
     }
 
     protected void resyncInventoryViewSlotNextTick(MenuPlugin plugin, Player player, int rawSlot) {
