@@ -23,6 +23,7 @@ softdepend:
   - MythicMobs
   - BreweryX
   - MMOItems
+  - SaoWorld-Packets
 folia-supported: true
 loadbefore:
   - SuperiorSkyblock2

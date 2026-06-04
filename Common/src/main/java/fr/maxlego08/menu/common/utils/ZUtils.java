@@ -1,5 +1,6 @@
 package fr.maxlego08.menu.common.utils;
 
+import com.saoworld.packets.SaoPacketsAPI;
 import fr.maxlego08.menu.api.MenuPlugin;
 import fr.maxlego08.menu.api.utils.EnumInventory;
 import fr.maxlego08.menu.api.utils.Message;
@@ -12,6 +13,7 @@ import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.HoverEvent.Action;
 import net.md_5.bungee.api.chat.TextComponent;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.command.Command;
@@ -20,7 +22,6 @@ import org.bukkit.command.SimpleCommandMap;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
@@ -268,18 +269,26 @@ public abstract class ZUtils extends MessageUtils {
 
     protected void resyncInventoryViewSlot(Player player, int rawSlot) {
         InventoryView view = player.getOpenInventory();
-        boolean changed = false;
-        if (rawSlot >= 0 && rawSlot < view.countSlots()) {
-            view.setItem(rawSlot, view.getItem(rawSlot));
-            changed = true;
+        if (rawSlot < 0 || rawSlot >= getClientContainerSlotCount(view)) {
+            return;
         }
-        Inventory topInventory = view.getTopInventory();
-        if (rawSlot >= 0 && rawSlot < topInventory.getSize()) {
-            topInventory.setItem(rawSlot, topInventory.getItem(rawSlot));
-            changed = true;
+        ItemStack item = view.getItem(rawSlot);
+        if (Bukkit.getPluginManager().isPluginEnabled("SaoWorld-Packets") && sendSaoInventorySlot(player, rawSlot, item)) {
+            return;
         }
-        if (changed) {
-            player.updateInventory();
+        view.setItem(rawSlot, item);
+    }
+
+    private int getClientContainerSlotCount(InventoryView view) {
+        return view.getTopInventory().getSize() + 36;
+    }
+
+    private boolean sendSaoInventorySlot(Player player, int rawSlot, ItemStack item) {
+        try {
+            SaoPacketsAPI.sendInventorySlot(player, rawSlot, item);
+            return true;
+        } catch (LinkageError exception) {
+            return false;
         }
     }
 
