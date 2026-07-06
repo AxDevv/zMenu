@@ -17,6 +17,7 @@ import fr.maxlego08.menu.common.utils.nms.ItemStackUtils;
 import fr.maxlego08.menu.common.utils.nms.NMSUtils;
 import fr.maxlego08.menu.inventory.inventories.InventoryDefault;
 import fr.maxlego08.menu.listener.ListenerAdapter;
+import fr.maxlego08.menu.zcore.logger.Logger;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -180,10 +181,30 @@ public class VInventoryManager extends ListenerAdapter implements VInvManager {
     protected void onInventoryClose(InventoryCloseEvent event, Player player) {
         if (player.isDead()) return;
         InventoryHolder holder = CompatibilityUtil.getTopInventory(event).getHolder();
+        logPlayerInv("EVENT close player=" + player.getName()
+            + " uuid=" + player.getUniqueId()
+            + " eventHolder=" + holderName(holder)
+            + " currentHolder=" + holderName(CompatibilityUtil.getTopInventory(player).getHolder()));
         if (holder instanceof VInventory inventory) {
             this.plugin.getInventoryManager().getInventoryListeners().forEach(listener -> listener.onInventoryClose(player, inventory));
             inventory.onPreClose(event, this.plugin, player);
         }
+    }
+
+    private void logPlayerInv(String message) {
+        Logger.info("[PlayerInvDebug] " + message, Logger.LogType.WARNING);
+    }
+
+    private String holderName(InventoryHolder holder) {
+        if (holder == null) {
+            return "null";
+        }
+        if (holder instanceof InventoryDefault inventoryDefault) {
+            return "InventoryDefault(" + inventoryDefault.getMenuInventory().getFileName()
+                + "/" + inventoryDefault.getMenuInventory().getName()
+                + ",page=" + inventoryDefault.getPage() + ")";
+        }
+        return holder.getClass().getName();
     }
 
     @Override

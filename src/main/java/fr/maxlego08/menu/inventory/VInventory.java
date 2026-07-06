@@ -11,6 +11,7 @@ import fr.maxlego08.menu.api.engine.ItemButton;
 import fr.maxlego08.menu.api.exceptions.InventoryOpenException;
 import fr.maxlego08.menu.api.utils.ClearInvType;
 import fr.maxlego08.menu.common.utils.ZUtils;
+import fr.maxlego08.menu.zcore.logger.Logger;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -130,13 +131,48 @@ public abstract class VInventory extends ZUtils implements Cloneable, BaseInvent
         if (inPlayerInventory) {
 
             this.playerInventoryItems.put(slot, button);
+            logPlayerInv("ADD player-inv button player=" + playerName()
+                + " uuid=" + playerUuid()
+                + " gui=" + this.guiName
+                + " page=" + this.page
+                + " slot=" + slot
+                + " item=" + itemDescription(itemStack)
+                + " listenerCancelled=" + needCancel
+                + " before=" + (this.player == null ? "no-player" : itemDescription(this.player.getInventory().getItem(slot)))
+                + " clearInvType=" + this.clearInvType);
             if (!needCancel) this.player.getInventory().setItem(slot, itemStack);
+            logPlayerInv("ADD player-inv button done player=" + playerName()
+                + " uuid=" + playerUuid()
+                + " gui=" + this.guiName
+                + " page=" + this.page
+                + " slot=" + slot
+                + " after=" + (this.player == null ? "no-player" : itemDescription(this.player.getInventory().getItem(slot)))
+                + " listenerCancelled=" + needCancel);
         } else {
 
             this.items.put(slot, button);
             if (!needCancel) this.inventory.setItem(slot, itemStack);
         }
         return button;
+    }
+
+    private void logPlayerInv(String message) {
+        Logger.info("[PlayerInvDebug] " + message, Logger.LogType.WARNING);
+    }
+
+    private String playerName() {
+        return this.player == null ? "null" : this.player.getName();
+    }
+
+    private String playerUuid() {
+        return this.player == null ? "null" : this.player.getUniqueId().toString();
+    }
+
+    private String itemDescription(ItemStack itemStack) {
+        if (itemStack == null || itemStack.getType().isAir()) {
+            return "AIR";
+        }
+        return itemStack.getType().name() + "x" + itemStack.getAmount();
     }
 
     @Override

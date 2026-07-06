@@ -19,15 +19,24 @@ import fr.maxlego08.menu.api.utils.OpenWithItem;
 import fr.maxlego08.menu.api.utils.Placeholders;
 import fr.maxlego08.menu.common.utils.ZUtils;
 import fr.maxlego08.menu.inventory.inventories.InventoryDefault;
+import fr.maxlego08.menu.zcore.logger.Logger;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 
 import java.io.File;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class ZInventory extends ZUtils implements Inventory {
+
+    private static final AtomicLong PLAYER_INV_DEBUG_SEQUENCE = new AtomicLong();
+    private static final AtomicLong PLAYER_INV_OPEN_SEQUENCE = new AtomicLong();
+    private static final Map<InventoryEngine, Long> PLAYER_INV_ENGINE_GENERATIONS = Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<UUID, Long> PLAYER_INV_ACTIVE_GENERATIONS = new ConcurrentHashMap<>();
 
     private final Plugin plugin;
     private final String name;
@@ -225,44 +234,109 @@ public class ZInventory extends ZUtils implements Inventory {
 
         InventoriesPlayer inventoriesPlayer = inventoryDefault.getPlugin().getInventoriesPlayer();
         InventoryHolder holder = CompatibilityUtil.getTopInventory(player).getHolder();
+        UUID playerUuid = player.getUniqueId();
+        long openGeneration = PLAYER_INV_OPEN_SEQUENCE.incrementAndGet();
+        PLAYER_INV_ENGINE_GENERATIONS.put(inventoryDefault, openGeneration);
+        PLAYER_INV_ACTIVE_GENERATIONS.put(playerUuid, openGeneration);
+        logPlayerInv("OPEN start player=" + player.getName()
+            + " uuid=" + playerUuid
+            + " openGeneration=" + openGeneration
+            + " target=" + menuName(this)
+            + " clearInventory=" + this.clearInventory
+            + " clearInvType=" + this.clearInvType
+            + " holder=" + holderName(holder)
+            + " savedBefore=" + inventoriesPlayer.hasSavedInventory(playerUuid)
+            + " targetConfiguredPlayerSlots=" + configuredPlayerSlots(this.buttons));
 
         if (holder instanceof InventoryDefault inventoryHolder) {
+            logPlayerInv("OPEN switch detected player=" + player.getName()
+                + " from=" + menuName(inventoryHolder.getMenuInventory())
+                + " to=" + menuName(this)
+                + " fromClearInventory=" + inventoryHolder.getMenuInventory().cleanInventory()
+                + " fromClearInvType=" + inventoryHolder.getMenuInventory().getClearInvType()
+                + " fromRuntimePlayerSlots=" + runtimePlayerSlots(inventoryHolder)
+                + " savedBeforeClear=" + inventoriesPlayer.hasSavedInventory(playerUuid));
             clearPlayerInventoryButtons(player, inventoryHolder);
+            logPlayerInv("OPEN after clearing previous player-inv buttons player=" + player.getName()
+                + " from=" + menuName(inventoryHolder.getMenuInventory())
+                + " savedAfterClear=" + inventoriesPlayer.hasSavedInventory(playerUuid));
 
             if (inventoryHolder.getMenuInventory().cleanInventory() && !this.clearInventory) {
+                logPlayerInv("OPEN restoring saved inventory because previous menu cleared inventory and target does not player="
+                    + player.getName() + " from=" + menuName(inventoryHolder.getMenuInventory())
+                    + " to=" + menuName(this));
                 inventoriesPlayer.giveInventory(player);
             } else if (this.clearInventory) {
+                logPlayerInv("OPEN storing inventory for target menu player=" + player.getName()
+                    + " target=" + menuName(this)
+                    + " storage=" + (this.clearInvType == ClearInvType.DEFAULT ? "permanent" : "temporary")
+                    + " savedBeforeStore=" + inventoriesPlayer.hasSavedInventory(playerUuid));
                 if (this.clearInvType == ClearInvType.DEFAULT){
                     inventoriesPlayer.storeInventory(player);
                 } else {
                     inventoriesPlayer.storeInventoryTemporary(player);
                 }
+                logPlayerInv("OPEN after store player=" + player.getName()
+                    + " target=" + menuName(this)
+                    + " savedAfterStore=" + inventoriesPlayer.hasSavedInventory(playerUuid));
             }
         } else if (this.clearInventory) {
+            logPlayerInv("OPEN storing inventory from non-zMenu holder player=" + player.getName()
+                + " target=" + menuName(this)
+                + " holder=" + holderName(holder)
+                + " storage=" + (this.clearInvType == ClearInvType.DEFAULT ? "permanent" : "temporary")
+                + " savedBeforeStore=" + inventoriesPlayer.hasSavedInventory(playerUuid));
             if (this.clearInvType == ClearInvType.DEFAULT) {
                 inventoriesPlayer.storeInventory(player);
             } else {
                 inventoriesPlayer.storeInventoryTemporary(player);
             }
+            logPlayerInv("OPEN after non-zMenu store player=" + player.getName()
+                + " target=" + menuName(this)
+                + " savedAfterStore=" + inventoriesPlayer.hasSavedInventory(playerUuid));
         }
 
         var placeholders = new Placeholders();
         this.openActions.forEach(action -> action.preExecute(player, null, inventoryDefault, placeholders));
 
+        logPlayerInv("OPEN end player=" + player.getName()
+            + " target=" + menuName(this)
+            + " openGeneration=" + openGeneration
+            + " activeGeneration=" + PLAYER_INV_ACTIVE_GENERATIONS.get(playerUuid)
+            + " savedEnd=" + inventoriesPlayer.hasSavedInventory(playerUuid));
         return InventoryResult.SUCCESS;
     }
 
     private void clearPlayerInventoryButtons(Player player, InventoryEngine inventoryDefault) {
         ClearInvType clearInvType = inventoryDefault.getMenuInventory().getClearInvType();
+        logPlayerInv("CLEAR player-inv buttons start player=" + player.getName()
+            + " menu=" + menuName(inventoryDefault.getMenuInventory())
+            + " clearInvType=" + clearInvType
+            + " slots=" + runtimePlayerSlots(inventoryDefault));
         for (Button button : inventoryDefault.getButtons()) {
             if (button.isPlayerInventory()) {
                 for (int slot : button.getSlots()) {
                     if (slot >= 0 && slot <= 36) {
+                        logPlayerInv("CLEAR slot player=" + player.getName()
+                            + " menu=" + menuName(inventoryDefault.getMenuInventory())
+                            + " button=" + button.getName()
+                            + " slot=" + slot
+                            + " before=" + itemDescription(player.getInventory().getItem(slot))
+                            + " clearInvType=" + clearInvType);
                         clearInvType.getOnButtonClear().accept(player, slot);
+                        logPlayerInv("CLEAR slot done player=" + player.getName()
+                            + " menu=" + menuName(inventoryDefault.getMenuInventory())
+                            + " button=" + button.getName()
+                            + " slot=" + slot
+                            + " after=" + itemDescription(player.getInventory().getItem(slot))
+                            + " clearInvType=" + clearInvType);
                     }
                 }
             }
         }
+        logPlayerInv("CLEAR player-inv buttons end player=" + player.getName()
+            + " menu=" + menuName(inventoryDefault.getMenuInventory())
+            + " clearInvType=" + clearInvType);
     }
 
     @Override
@@ -273,29 +347,171 @@ public class ZInventory extends ZUtils implements Inventory {
     @Override
     public void closeInventory(Player player, InventoryEngine inventoryDefault) {
 
+        UUID playerUuid = player.getUniqueId();
+        long sequence = PLAYER_INV_DEBUG_SEQUENCE.incrementAndGet();
+        Long closeGeneration = PLAYER_INV_ENGINE_GENERATIONS.get(inventoryDefault);
+        Long activeGenerationAtSchedule = PLAYER_INV_ACTIVE_GENERATIONS.get(playerUuid);
+        boolean savedAtSchedule = inventoryDefault.getPlugin().getInventoriesPlayer().hasSavedInventory(playerUuid);
+        logPlayerInv("CLOSE schedule player=" + player.getName()
+            + " uuid=" + playerUuid
+            + " seq=" + sequence
+            + " closeGeneration=" + closeGeneration
+            + " activeGenerationAtSchedule=" + activeGenerationAtSchedule
+            + " menu=" + menuName(this)
+            + " clearInventory=" + this.clearInventory
+            + " clearInvType=" + this.clearInvType
+            + " runtimePlayerSlots=" + runtimePlayerSlots(inventoryDefault)
+            + " holderNow=" + holderName(CompatibilityUtil.getTopInventory(player).getHolder())
+            + " savedAtSchedule=" + savedAtSchedule);
         ZMenuPlugin.getInstance().getScheduler().runAtEntityLater(player, task -> {
             InventoryHolder newHolder = CompatibilityUtil.getTopInventory(player).getHolder();
             boolean isInNewzMenuInventory = newHolder instanceof InventoryDefault;
+            InventoriesPlayer inventoriesPlayer = inventoryDefault.getPlugin().getInventoriesPlayer();
+            Long activeGenerationAtDelayed = PLAYER_INV_ACTIVE_GENERATIONS.get(playerUuid);
+            boolean supersededClose = closeGeneration != null && !Objects.equals(closeGeneration, activeGenerationAtDelayed);
+            boolean savedBeforeDelayed = inventoriesPlayer.hasSavedInventory(playerUuid);
+            logPlayerInv("CLOSE delayed start player=" + player.getName()
+                + " seq=" + sequence
+                + " closeGeneration=" + closeGeneration
+                + " activeGenerationAtDelayed=" + activeGenerationAtDelayed
+                + " supersededClose=" + supersededClose
+                + " menu=" + menuName(this)
+                + " newHolder=" + holderName(newHolder)
+                + " isInNewzMenuInventory=" + isInNewzMenuInventory
+                + " savedBeforeDelayed=" + savedBeforeDelayed);
+            if (supersededClose) {
+                logPlayerInv("CLOSE delayed superseded skip cleanup player=" + player.getName()
+                    + " seq=" + sequence
+                    + " menu=" + menuName(this)
+                    + " closeGeneration=" + closeGeneration
+                    + " activeGenerationAtDelayed=" + activeGenerationAtDelayed
+                    + " slotsNotCleared=" + runtimePlayerSlots(inventoryDefault)
+                    + " savedSnapshotKept=" + inventoriesPlayer.hasSavedInventory(playerUuid));
+                var placeholders = new Placeholders();
+                logPlayerInv("CLOSE delayed executing switch close-actions player=" + player.getName()
+                    + " seq=" + sequence
+                    + " menu=" + menuName(this)
+                    + " reason=superseded-generation"
+                    + " skippedTypes=" + Configuration.skipCloseActionsOnInventorySwitch);
+                for (Action action : this.closeActions) {
+                    if (!Configuration.skipCloseActionsOnInventorySwitch.contains(action.getType())) {
+                        action.preExecute(player, null, inventoryDefault, placeholders);
+                    }
+                }
+                PLAYER_INV_ENGINE_GENERATIONS.remove(inventoryDefault);
+                logPlayerInv("CLOSE delayed end player=" + player.getName()
+                    + " seq=" + sequence
+                    + " menu=" + menuName(this)
+                    + " reason=superseded-generation"
+                    + " activeGenerationEnd=" + PLAYER_INV_ACTIVE_GENERATIONS.get(playerUuid)
+                    + " savedEnd=" + inventoriesPlayer.hasSavedInventory(playerUuid));
+                return;
+            }
             if (newHolder != null && !(newHolder instanceof InventoryDefault)) {
+                logPlayerInv("CLOSE delayed final-close branch player=" + player.getName()
+                    + " seq=" + sequence
+                    + " closeGeneration=" + closeGeneration
+                    + " menu=" + menuName(this)
+                    + " slotsToClear=" + runtimePlayerSlots(inventoryDefault)
+                    + " willRestore=" + this.clearInventory);
                 clearPlayerInventoryButtons(player, inventoryDefault);
 
                 if (this.clearInventory) {
-                    InventoriesPlayer inventoriesPlayer = inventoryDefault.getPlugin().getInventoriesPlayer();
+                    logPlayerInv("CLOSE delayed restoring saved inventory player=" + player.getName()
+                        + " seq=" + sequence
+                        + " menu=" + menuName(this)
+                        + " savedBeforeRestore=" + inventoriesPlayer.hasSavedInventory(player.getUniqueId())
+                        + " clearInvType=" + this.clearInvType);
                     this.clearInvType.getOnInventoryClose().accept(inventoriesPlayer, player);
+                    logPlayerInv("CLOSE delayed restore finished player=" + player.getName()
+                        + " seq=" + sequence
+                        + " menu=" + menuName(this)
+                        + " savedAfterRestore=" + inventoriesPlayer.hasSavedInventory(player.getUniqueId()));
                 }
+            } else {
+                logPlayerInv("CLOSE delayed skipped final cleanup player=" + player.getName()
+                    + " seq=" + sequence
+                    + " closeGeneration=" + closeGeneration
+                    + " menu=" + menuName(this)
+                    + " reason=" + (newHolder == null ? "null-holder" : "new-zmenu-holder"));
             }
             var placeholders = new Placeholders();
             if (isInNewzMenuInventory) {
+                logPlayerInv("CLOSE delayed executing switch close-actions player=" + player.getName()
+                    + " seq=" + sequence
+                    + " menu=" + menuName(this)
+                    + " skippedTypes=" + Configuration.skipCloseActionsOnInventorySwitch);
                 for (Action action : this.closeActions) {
                     if (!Configuration.skipCloseActionsOnInventorySwitch.contains(action.getType())) {
                         action.preExecute(player, null, inventoryDefault, placeholders);
                     }
                 }
             } else {
+                logPlayerInv("CLOSE delayed executing final close-actions player=" + player.getName()
+                    + " seq=" + sequence
+                    + " menu=" + menuName(this)
+                    + " actionCount=" + this.closeActions.size());
                 this.closeActions.forEach(action -> action.preExecute(player, null, inventoryDefault, placeholders));
             }
+            if (!isInNewzMenuInventory && closeGeneration != null) {
+                PLAYER_INV_ACTIVE_GENERATIONS.remove(playerUuid, closeGeneration);
+            }
+            PLAYER_INV_ENGINE_GENERATIONS.remove(inventoryDefault);
+            logPlayerInv("CLOSE delayed end player=" + player.getName()
+                + " seq=" + sequence
+                + " menu=" + menuName(this)
+                + " activeGenerationEnd=" + PLAYER_INV_ACTIVE_GENERATIONS.get(playerUuid)
+                + " savedEnd=" + inventoriesPlayer.hasSavedInventory(player.getUniqueId()));
         }, 1);
 
+    }
+
+    private void logPlayerInv(String message) {
+        Logger.info("[PlayerInvDebug] " + message, Logger.LogType.WARNING);
+    }
+
+    private String menuName(Inventory inventory) {
+        if (inventory == null) {
+            return "null";
+        }
+        return inventory.getFileName() + "/" + inventory.getName();
+    }
+
+    private String holderName(InventoryHolder holder) {
+        if (holder == null) {
+            return "null";
+        }
+        if (holder instanceof InventoryDefault inventoryDefault) {
+            return "InventoryDefault(" + menuName(inventoryDefault.getMenuInventory()) + ",page=" + inventoryDefault.getPage() + ")";
+        }
+        return holder.getClass().getName();
+    }
+
+    private String runtimePlayerSlots(InventoryEngine inventoryDefault) {
+        TreeSet<Integer> slots = new TreeSet<>();
+        for (Button button : inventoryDefault.getButtons()) {
+            if (button.isPlayerInventory()) {
+                slots.addAll(button.getSlots());
+            }
+        }
+        return slots.toString();
+    }
+
+    private String configuredPlayerSlots(Collection<Button> buttons) {
+        TreeSet<Integer> slots = new TreeSet<>();
+        for (Button button : buttons) {
+            if (button.isPlayerInventory()) {
+                slots.addAll(button.getSlots());
+            }
+        }
+        return slots.toString();
+    }
+
+    private String itemDescription(ItemStack itemStack) {
+        if (itemStack == null || itemStack.getType().isAir()) {
+            return "AIR";
+        }
+        return itemStack.getType().name() + "x" + itemStack.getAmount();
     }
 
     @Override
