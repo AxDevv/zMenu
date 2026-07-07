@@ -293,7 +293,10 @@ public abstract class ZUtils extends MessageUtils {
     }
 
     protected void resyncInventoryViewSlotNextTick(MenuPlugin plugin, Player player, int rawSlot) {
-        plugin.getScheduler().runAtEntityLater(player, task -> resyncInventoryViewSlot(player, rawSlot), 1);
+        plugin.getScheduler().runAtEntityLater(player, task -> {
+            resyncInventoryViewSlot(player, rawSlot);
+            player.updateInventory();
+        }, 1);
     }
 
     /**
