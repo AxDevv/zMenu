@@ -28,8 +28,14 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class ZInventory extends ZUtils implements ContainerInventorySetter {
+
+    private static final AtomicLong PLAYER_INV_OPEN_SEQUENCE = new AtomicLong();
+    private static final Map<InventoryEngine, Long> PLAYER_INV_ENGINE_GENERATIONS = Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<UUID, Long> PLAYER_INV_ACTIVE_GENERATIONS = new ConcurrentHashMap<>();
 
     private final Plugin plugin;
     private final String name;
@@ -230,6 +236,10 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
 
         InventoriesPlayer inventoriesPlayer = inventoryDefault.getPlugin().getInventoriesPlayer();
         InventoryHolder holder = CompatibilityUtil.getTopInventory(player).getHolder();
+        UUID playerUuid = player.getUniqueId();
+        long openGeneration = PLAYER_INV_OPEN_SEQUENCE.incrementAndGet();
+        PLAYER_INV_ENGINE_GENERATIONS.put(inventoryDefault, openGeneration);
+        PLAYER_INV_ACTIVE_GENERATIONS.put(playerUuid, openGeneration);
 
         if (holder instanceof InventoryDefault inventoryHolder) {
             this.clearPlayerInventoryButtons(player, inventoryHolder);
@@ -306,9 +316,18 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
     public void closeInventory(Player player, InventoryEngine inventoryDefault) {
 
         MenuPlugin menuPlugin = inventoryDefault.getPlugin();
+        UUID playerUuid = player.getUniqueId();
+        Long closeGeneration = PLAYER_INV_ENGINE_GENERATIONS.get(inventoryDefault);
         menuPlugin.getScheduler().runAtEntityLater(player, task -> {
             InventoryHolder newHolder = CompatibilityUtil.getTopInventory(player).getHolder();
             boolean isInNewzMenuInventory = newHolder instanceof InventoryDefault;
+
+            if (isSupersededClose(playerUuid, closeGeneration)) {
+                executeCloseActions(player, inventoryDefault, true);
+                PLAYER_INV_ENGINE_GENERATIONS.remove(inventoryDefault);
+                return;
+            }
+
             if (newHolder != null && !(newHolder instanceof InventoryDefault)) {
 
                 List<ItemStack> sessionItems = this.clearInventory ? collectSessionItems(player, inventoryDefault) : Collections.emptyList();
@@ -321,18 +340,32 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
                     restoreSessionItems(player, sessionItems);
                 }
             }
-            var placeholders = new Placeholders();
-            if (isInNewzMenuInventory) {
-                for (Action action : this.closeActions) {
-                    if (!Configuration.skipCloseActionsOnInventorySwitch.contains(action.getType())) {
-                        action.preExecute(player, null, inventoryDefault, placeholders);
-                    }
-                }
-            } else {
-                this.closeActions.forEach(action -> action.preExecute(player, null, inventoryDefault, placeholders));
+
+            executeCloseActions(player, inventoryDefault, isInNewzMenuInventory);
+
+            if (!isInNewzMenuInventory && closeGeneration != null) {
+                PLAYER_INV_ACTIVE_GENERATIONS.remove(playerUuid, closeGeneration);
             }
+            PLAYER_INV_ENGINE_GENERATIONS.remove(inventoryDefault);
         }, 1);
 
+    }
+
+    private static boolean isSupersededClose(UUID playerUuid, Long closeGeneration) {
+        return closeGeneration != null && !Objects.equals(closeGeneration, PLAYER_INV_ACTIVE_GENERATIONS.get(playerUuid));
+    }
+
+    private void executeCloseActions(Player player, InventoryEngine inventoryDefault, boolean inventorySwitch) {
+        var placeholders = new Placeholders();
+        if (inventorySwitch) {
+            for (Action action : this.closeActions) {
+                if (!Configuration.skipCloseActionsOnInventorySwitch.contains(action.getType())) {
+                    action.preExecute(player, null, inventoryDefault, placeholders);
+                }
+            }
+        } else {
+            this.closeActions.forEach(action -> action.preExecute(player, null, inventoryDefault, placeholders));
+        }
     }
 
     @Override
