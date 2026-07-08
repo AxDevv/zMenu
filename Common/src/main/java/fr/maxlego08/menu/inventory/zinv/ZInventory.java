@@ -328,7 +328,7 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
                 return;
             }
 
-            if (newHolder != null && !(newHolder instanceof InventoryDefault)) {
+            if (!isInNewzMenuInventory) {
 
                 List<ItemStack> sessionItems = this.clearInventory ? collectSessionItems(player, inventoryDefault) : Collections.emptyList();
 
