@@ -234,12 +234,19 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
             return InventoryResult.PERMISSION;
         }
 
-        InventoriesPlayer inventoriesPlayer = inventoryDefault.getPlugin().getInventoriesPlayer();
+        MenuPlugin menuPlugin = inventoryDefault.getPlugin();
+        InventoriesPlayer inventoriesPlayer = menuPlugin.getInventoriesPlayer();
         InventoryHolder holder = CompatibilityUtil.getTopInventory(player).getHolder();
         UUID playerUuid = player.getUniqueId();
         long openGeneration = PLAYER_INV_OPEN_SEQUENCE.incrementAndGet();
-        PLAYER_INV_ENGINE_GENERATIONS.put(inventoryDefault, openGeneration);
         PLAYER_INV_ACTIVE_GENERATIONS.put(playerUuid, openGeneration);
+        PLAYER_INV_ENGINE_GENERATIONS.put(inventoryDefault, openGeneration);
+        boolean savedBeforeOpen = inventoriesPlayer.hasSavedInventory(playerUuid);
+        boolean switchingFromClearInventory = holder instanceof InventoryDefault inventoryHolder
+            && inventoryHolder.getMenuInventory() instanceof ContainerInventory containerInventory
+            && containerInventory.clearInventory();
+
+        repairStaleSavedInventoryBeforeOpen(menuPlugin, inventoriesPlayer, player, holder, savedBeforeOpen, switchingFromClearInventory);
 
         if (holder instanceof InventoryDefault inventoryHolder) {
             this.clearPlayerInventoryButtons(player, inventoryHolder);
@@ -261,6 +268,16 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
             }
         }
 
+        if (this.clearInventory && this.clearInvType == ClearInvType.DEFAULT && !inventoriesPlayer.hasSavedInventory(playerUuid)) {
+            menuPlugin.getLogger().warning("[ClearInventoryAnomaly] Unable to save player inventory for clear-inventory menu player="
+                + playerUuid
+                + " inventory=" + this.fileName
+                + " holder=" + describeHolder(holder)
+                + " savedBeforeOpen=" + savedBeforeOpen
+                + " switchingFromClearInventory=" + switchingFromClearInventory
+                + " clearType=" + this.clearInvType);
+        }
+
         var placeholders = new Placeholders();
         this.openActions.forEach(action -> action.preExecute(player, null, inventoryDefault, placeholders));
 
@@ -268,11 +285,12 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
     }
 
     private void clearPlayerInventoryButtons(Player player, InventoryEngine inventoryDefault) {
+        ClearInvType buttonClearType = resolveClearInvType(inventoryDefault);
         for (Button button : inventoryDefault.getButtons()) {
             if (button.isPlayerInventory()) {
                 for (int slot : button.getSlots()) {
                     if (slot >= 0 && slot <= 36) {
-                        this.clearInvType.getOnButtonClear().accept(player, slot);
+                        buttonClearType.getOnButtonClear().accept(player, slot);
                     }
                 }
             }
@@ -291,9 +309,10 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
 
         List<ItemStack> sessionItems = new ArrayList<>();
         var playerInventory = player.getInventory();
-        for (int slot = 0; slot < playerInventory.getSize(); slot++) {
+        ItemStack[] storageContents = playerInventory.getStorageContents();
+        for (int slot = 0; slot < storageContents.length; slot++) {
             if (buttonSlots.contains(slot)) continue;
-            ItemStack item = playerInventory.getItem(slot);
+            ItemStack item = storageContents[slot];
             if (item != null && !item.getType().isAir()) {
                 sessionItems.add(item.clone());
             }
@@ -321,8 +340,9 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
         menuPlugin.getScheduler().runAtEntityLater(player, task -> {
             InventoryHolder newHolder = CompatibilityUtil.getTopInventory(player).getHolder();
             boolean isInNewzMenuInventory = newHolder instanceof InventoryDefault;
+            boolean supersededClose = isSupersededClose(playerUuid, closeGeneration);
 
-            if (isSupersededClose(playerUuid, closeGeneration)) {
+            if (supersededClose) {
                 executeCloseActions(player, inventoryDefault, true);
                 PLAYER_INV_ENGINE_GENERATIONS.remove(inventoryDefault);
                 return;
@@ -330,15 +350,41 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
 
             if (!isInNewzMenuInventory) {
 
-                List<ItemStack> sessionItems = this.clearInventory ? collectSessionItems(player, inventoryDefault) : Collections.emptyList();
+                ClearInvType closeClearInvType = resolveClearInvType(inventoryDefault);
+                boolean restoreSessionItems = this.clearInventory && closeClearInvType == ClearInvType.DEFAULT;
+                List<ItemStack> sessionItems = restoreSessionItems ? collectSessionItems(player, inventoryDefault) : Collections.emptyList();
 
                 this.clearPlayerInventoryButtons(player, inventoryDefault);
 
                 if (this.clearInventory) {
                     InventoriesPlayer inventoriesPlayer = menuPlugin.getInventoriesPlayer();
-                    this.clearInvType.getOnInventoryClose().accept(inventoriesPlayer, player);
-                    restoreSessionItems(player, sessionItems);
+                    boolean hadSavedInventory = inventoriesPlayer.hasSavedInventory(playerUuid);
+                    if (closeClearInvType == ClearInvType.DEFAULT && !hadSavedInventory) {
+                        menuPlugin.getLogger().warning("[ClearInventoryAnomaly] Clear-inventory menu closed without saved inventory to restore player="
+                            + playerUuid
+                            + " inventory=" + menuFileName(inventoryDefault)
+                            + " clearType=" + closeClearInvType);
+                    }
+                    closeClearInvType.getOnInventoryClose().accept(inventoriesPlayer, player);
+                    if (closeClearInvType == ClearInvType.DEFAULT && inventoriesPlayer.hasSavedInventory(playerUuid)) {
+                        menuPlugin.getLogger().warning("[ClearInventoryAnomaly] Saved inventory remained after clear-inventory close; forcing restore player="
+                            + playerUuid
+                            + " inventory=" + menuFileName(inventoryDefault)
+                            + " savedItems=" + savedInventorySize(inventoriesPlayer, playerUuid)
+                            + " clearType=" + closeClearInvType);
+                        inventoriesPlayer.forceGiveInventory(player);
+                    }
+                    if (restoreSessionItems) {
+                        restoreSessionItems(player, sessionItems);
+                    }
                 }
+            } else if (this.clearInventory) {
+                menuPlugin.getLogger().warning("[ClearInventoryAnomaly] Clear-inventory close still sees a zMenu inventory without a newer generation player="
+                    + playerUuid
+                    + " inventory=" + menuFileName(inventoryDefault)
+                    + " newHolder=" + describeHolder(newHolder)
+                    + " closeGeneration=" + closeGeneration
+                    + " activeGeneration=" + PLAYER_INV_ACTIVE_GENERATIONS.get(playerUuid));
             }
 
             executeCloseActions(player, inventoryDefault, isInNewzMenuInventory);
@@ -349,6 +395,97 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
             PLAYER_INV_ENGINE_GENERATIONS.remove(inventoryDefault);
         }, 1);
 
+    }
+
+    private void repairStaleSavedInventoryBeforeOpen(MenuPlugin menuPlugin,
+                                                     InventoriesPlayer inventoriesPlayer,
+                                                     Player player,
+                                                     InventoryHolder holder,
+                                                     boolean savedBeforeOpen,
+                                                     boolean switchingFromClearInventory) {
+        if (!this.clearInventory || !savedBeforeOpen || switchingFromClearInventory || holder instanceof InventoryDefault) {
+            return;
+        }
+        UUID playerUuid = player.getUniqueId();
+        int savedItems = savedInventorySize(inventoriesPlayer, playerUuid);
+        if (hasVisiblePlayerItems(menuPlugin, player)) {
+            clearMenuDisplayItems(menuPlugin, player);
+            inventoriesPlayer.clearInventorie(playerUuid);
+            menuPlugin.getLogger().warning("[ClearInventoryAnomaly] Replaced stale saved inventory before clear-inventory open player="
+                + playerUuid
+                + " inventory=" + this.fileName
+                + " holder=" + describeHolder(holder)
+                + " staleSavedItems=" + savedItems
+                + " clearType=" + this.clearInvType);
+            return;
+        }
+        if (savedItems > 0) {
+            menuPlugin.getLogger().warning("[ClearInventoryAnomaly] Restored stale saved inventory before clear-inventory open player="
+                + playerUuid
+                + " inventory=" + this.fileName
+                + " holder=" + describeHolder(holder)
+                + " savedItems=" + savedItems
+                + " clearType=" + this.clearInvType);
+            inventoriesPlayer.forceGiveInventory(player);
+            return;
+        }
+        clearMenuDisplayItems(menuPlugin, player);
+        inventoriesPlayer.clearInventorie(playerUuid);
+        menuPlugin.getLogger().warning("[ClearInventoryAnomaly] Dropped empty stale saved inventory before clear-inventory open player="
+            + playerUuid
+            + " inventory=" + this.fileName
+            + " holder=" + describeHolder(holder)
+            + " clearType=" + this.clearInvType);
+    }
+
+    private boolean hasVisiblePlayerItems(MenuPlugin menuPlugin, Player player) {
+        for (ItemStack itemStack : player.getInventory().getStorageContents()) {
+            if (isRealPlayerItem(menuPlugin, itemStack)) {
+                return true;
+            }
+        }
+        return isRealPlayerItem(menuPlugin, player.getInventory().getItemInOffHand());
+    }
+
+    private boolean isRealPlayerItem(MenuPlugin menuPlugin, ItemStack itemStack) {
+        if (itemStack == null || itemStack.getType().isAir()) {
+            return false;
+        }
+        return !menuPlugin.getDupeManager().isDupeItem(itemStack);
+    }
+
+    private void clearMenuDisplayItems(MenuPlugin menuPlugin, Player player) {
+        var inventory = player.getInventory();
+        ItemStack[] storageContents = inventory.getStorageContents();
+        for (int slot = 0; slot < storageContents.length; slot++) {
+            ItemStack itemStack = storageContents[slot];
+            if (itemStack != null && menuPlugin.getDupeManager().isDupeItem(itemStack)) {
+                inventory.setItem(slot, null);
+            }
+        }
+        ItemStack offHand = inventory.getItemInOffHand();
+        if (offHand != null && menuPlugin.getDupeManager().isDupeItem(offHand)) {
+            inventory.setItemInOffHand(null);
+        }
+    }
+
+    private String describeHolder(InventoryHolder holder) {
+        if (holder instanceof InventoryDefault inventoryDefault) {
+            return "zmenu:" + menuFileName(inventoryDefault);
+        }
+        return holder == null ? "none" : holder.getClass().getSimpleName();
+    }
+
+    private String menuFileName(InventoryEngine inventoryDefault) {
+        return inventoryDefault.getMenuInventory() == null ? this.fileName : inventoryDefault.getMenuInventory().getFileName();
+    }
+
+    private int savedInventorySize(InventoriesPlayer inventoriesPlayer, UUID playerUuid) {
+        try {
+            return inventoriesPlayer.getInventory(playerUuid).size();
+        } catch (RuntimeException exception) {
+            return -1;
+        }
     }
 
     private static boolean isSupersededClose(UUID playerUuid, Long closeGeneration) {
@@ -366,6 +503,13 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
         } else {
             this.closeActions.forEach(action -> action.preExecute(player, null, inventoryDefault, placeholders));
         }
+    }
+
+    private ClearInvType resolveClearInvType(InventoryEngine inventoryDefault) {
+        if (inventoryDefault.getMenuInventory() instanceof ContainerInventory containerInventory) {
+            return containerInventory.getClearInvType();
+        }
+        return this.clearInvType;
     }
 
     @Override
