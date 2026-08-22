@@ -146,16 +146,20 @@ public class VInventoryManager extends ListenerAdapter implements VInvManager {
 
         if (holder instanceof VInventory inventory) {
 
-            event.setCancelled(inventory.isDisableClick());
+            boolean alreadyCancelled = event.isCancelled();
 
             if (event.getClickedInventory().getType().equals(InventoryType.PLAYER)) {
 
-                event.setCancelled(inventory.isDisablePlayerInventoryClick());
+                event.setCancelled(InventoryClickPolicy.shouldCancel(alreadyCancelled, inventory.isDisablePlayerInventoryClick()));
+                if (alreadyCancelled) return;
 
                 inventory.onInventoryClick(event, this.plugin, player);
                 this.handleClick(true, player, inventory, event);
 
             } else {
+
+                event.setCancelled(InventoryClickPolicy.shouldCancel(alreadyCancelled, inventory.isDisableClick()));
+                if (alreadyCancelled) return;
 
                 inventory.onInventoryClick(event, this.plugin, player);
                 this.handleClick(false, player, inventory, event);

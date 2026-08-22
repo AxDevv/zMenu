@@ -4,9 +4,11 @@ import fr.maxlego08.menu.ZMenuPlugin;
 import fr.maxlego08.menu.api.players.inventory.InventoriesPlayer;
 import fr.maxlego08.menu.api.players.inventory.InventoryPlayer;
 import fr.maxlego08.menu.api.storage.dto.InventoryDTO;
+import fr.maxlego08.menu.inventory.zinv.ZInventory;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
@@ -108,9 +110,12 @@ public class ZInventoriesPlayer implements InventoriesPlayer {
         this.plugin.getStorageManager().removeInventory(uniqueId);
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.LOWEST)
     public void onDisconnect(PlayerQuitEvent event) {
         Player player = event.getPlayer();
+        if (ZInventory.restorePlayerInventoryBeforeExternalSave(this.plugin, player, "player-quit")) {
+            return;
+        }
         Optional<InventoryPlayer> playerInventory = this.getPlayerInventory(player.getUniqueId());
         if (playerInventory.isPresent()) {
             if (playerInventory.get().isPermanent())
@@ -125,8 +130,9 @@ public class ZInventoriesPlayer implements InventoriesPlayer {
         Player player = event.getPlayer();
         Optional<InventoryPlayer> playerInventory = this.getPlayerInventory(player.getUniqueId());
         if (playerInventory.isPresent()) {
-            if (playerInventory.get().isPermanent())
-                this.giveInventory(player);
+            if (playerInventory.get().isPermanent()) {
+                ZInventory.restorePlayerInventoryBeforeExternalSave(this.plugin, player, "player-join");
+            }
         }
     }
 
@@ -156,9 +162,12 @@ public class ZInventoriesPlayer implements InventoriesPlayer {
         new HashMap<>(this.inventories).forEach((uuid, inventoryPlayer) -> {
             Player player = Bukkit.getPlayer(uuid);
             if (player != null && player.isOnline()) {
-                inventoryPlayer.forceGiveInventory(player);
+                if (!ZInventory.restorePlayerInventoryBeforeExternalSave(this.plugin, player, "plugin-disable")) {
+                    this.forceGiveInventory(player);
+                }
+            } else {
+                this.inventories.remove(uuid);
             }
-            this.inventories.remove(uuid);
         });
     }
 }

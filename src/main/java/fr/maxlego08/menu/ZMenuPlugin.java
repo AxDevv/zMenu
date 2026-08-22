@@ -271,7 +271,7 @@ public class ZMenuPlugin extends ZPlugin implements MenuPlugin {
         Bukkit.getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
 
         if (Configuration.enableAntiDupe) {
-            this.addListener(new DupeListener(this.dupeManager));
+            this.addListener(new DupeListener(this, this.dupeManager));
         }
 
         if (!this.isActive(Plugins.ZMENUPLUS)) {
