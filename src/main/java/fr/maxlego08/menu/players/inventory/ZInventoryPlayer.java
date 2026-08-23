@@ -32,16 +32,20 @@ public class ZInventoryPlayer implements InventoryPlayer {
     }
 
     public void storeInventory(@NonNull Player player, boolean temporary) {
-        ClearInvType clearInvType = temporary ? ClearInvType.PACKET_EVENT : ClearInvType.DEFAULT;
-
         this.temporary = temporary;
         PlayerInventory playerInventory = player.getInventory();
         ItemStack[] content = playerInventory.getContents();
         for (int slot = 0; slot < STORAGE_SIZE; slot++) {
-            this.clear(slot, playerInventory, content, player, true, clearInvType);
+            this.capture(slot, content);
+            if (temporary) {
+                ClearInvType.PACKET_EVENT.getRemoveItem().accept(player, slot, playerInventory);
+            }
         }
         if (!NMSUtils.isOneHand()) {
-            this.clear(OFF_HAND_SLOT, playerInventory, content, player, true, clearInvType);
+            this.capture(OFF_HAND_SLOT, content);
+            if (temporary) {
+                ClearInvType.PACKET_EVENT.getRemoveItem().accept(player, OFF_HAND_SLOT, playerInventory);
+            }
         }
     }
 
@@ -59,12 +63,11 @@ public class ZInventoryPlayer implements InventoryPlayer {
         }
     }
 
-    private void clear(int slot, PlayerInventory playerInventory, ItemStack[] content, Player player, boolean save, ClearInvType clearInvType) {
+    private void capture(int slot, ItemStack[] content) {
         ItemStack itemStack = content[slot];
-        if (itemStack != null && save) {
+        if (itemStack != null) {
             this.items.put(slot, ItemStackUtils.serializeItemStack(itemStack));
         }
-        clearInvType.getRemoveItem().accept(player, slot, playerInventory);
     }
 
     @Override

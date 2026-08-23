@@ -244,6 +244,14 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
         }
 
         MenuPlugin menuPlugin = inventoryDefault.getPlugin();
+        boolean packetProjectionUnavailable = this.clearInvType == ClearInvType.PACKET_EVENT
+            && !menuPlugin.getServer().getPluginManager().isPluginEnabled("packetevents");
+        if (this.clearInventory && (this.clearInvType == ClearInvType.DEFAULT || packetProjectionUnavailable)) {
+            menuPlugin.getLogger().severe("Refused unsafe clear-inventory menu without PacketEvents player="
+                + player.getUniqueId()
+                + " inventory=" + this.fileName);
+            return InventoryResult.ERROR;
+        }
         InventoriesPlayer inventoriesPlayer = menuPlugin.getInventoriesPlayer();
         InventoryHolder holder = CompatibilityUtil.getTopInventory(player).getHolder();
         UUID playerUuid = player.getUniqueId();
@@ -390,7 +398,7 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
         clearTemporaryInventory(player);
 
         if (inventoriesPlayer.hasSavedInventory(playerUuid)) {
-            inventoriesPlayer.forceGiveInventory(player);
+            inventoriesPlayer.forceGiveInventoryDirect(player);
         } else {
             menuPlugin.getLogger().warning("[ClearInventoryAnomaly] Clear-inventory session had no saved inventory player="
                 + playerUuid
@@ -422,7 +430,7 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
             savedItems);
 
         clearTemporaryInventory(player);
-        inventoriesPlayer.forceGiveInventory(player);
+        inventoriesPlayer.forceGiveInventoryDirect(player);
         restoreSessionItems(player, orphanedItems);
         removeTemporaryCursorItem(menuPlugin, player);
         player.updateInventory();

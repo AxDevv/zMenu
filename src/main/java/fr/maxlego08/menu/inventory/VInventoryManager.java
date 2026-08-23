@@ -230,42 +230,64 @@ public class VInventoryManager extends ListenerAdapter implements VInvManager {
                 if (inventoryDefault.getMenuInventory() instanceof ContainerInventory containerInventory && containerInventory.clearInventory() && containerInventory.getClearInvType() == ClearInvType.DEFAULT) {
                     InventoriesPlayer inventoriesPlayer = this.plugin.getInventoriesPlayer();
                     Optional<InventoryPlayer> playerInventory = inventoriesPlayer.getPlayerInventory(player.getUniqueId());
-                    inventoriesPlayer.clearInventorie(player.getUniqueId());
-                    List<ItemStack> drops = event.getDrops();
-                    drops.clear();
-                    ItemStack[] armorContents = player.getInventory().getArmorContents();
-
-                    Map<Integer, String> items;
-                    if (playerInventory.isPresent()) {
-                        InventoryPlayer inventoryPlayer = playerInventory.get();
-                        items = inventoryPlayer.getItems();
-                    } else {
-                        items = Collections.emptyMap();
+                    if (playerInventory.isEmpty() || !playerInventory.get().isPermanent()) {
+                        this.plugin.getLogger().severe("Ignored zMenu death recovery without a validated permanent snapshot for "
+                            + player.getUniqueId());
+                        return;
                     }
-                    if (event.getKeepInventory()) {
-                        player.getInventory().clear();
-                        for (var entry : items.entrySet()) {
+
+                    Map<Integer, ItemStack> restoredItems = new HashMap<>();
+                    try {
+                        for (var entry : playerInventory.get().getItems().entrySet()) {
                             int slot = entry.getKey();
-                            String serializedItem = entry.getValue();
-                            ItemStack itemStack = ItemStackUtils.deserializeItemStack(serializedItem);
-                            if (itemStack != null) {
-                                player.getInventory().setItem(slot, itemStack);
+                            if (slot < 0 || slot >= player.getInventory().getSize()) {
+                                throw new IllegalStateException("invalid slot " + slot);
                             }
+                            ItemStack itemStack = ItemStackUtils.deserializeItemStack(entry.getValue());
+                            if (itemStack == null) throw new IllegalStateException("invalid item at slot " + slot);
+                            restoredItems.put(slot, itemStack);
                         }
-                        player.getInventory().setArmorContents(armorContents);
-                    } else {
-                        for (var entry : items.entrySet()) {
-                            String serializedItem = entry.getValue();
-                            ItemStack itemStack = ItemStackUtils.deserializeItemStack(serializedItem);
-                            if (itemStack != null) {
-                                drops.add(itemStack);
+                    } catch (RuntimeException error) {
+                        this.plugin.getLogger().severe("Quarantined invalid zMenu death recovery for "
+                            + player.getUniqueId() + ": " + error.getMessage());
+                        return;
+                    }
+
+                    List<ItemStack> drops = event.getDrops();
+                    List<ItemStack> originalDrops = new ArrayList<>(drops);
+                    ItemStack[] originalContents = cloneItems(player.getInventory().getContents());
+                    ItemStack[] armorContents = cloneItems(player.getInventory().getArmorContents());
+                    try {
+                        drops.clear();
+                        if (event.getKeepInventory()) {
+                            player.getInventory().clear();
+                            for (var entry : restoredItems.entrySet()) {
+                                player.getInventory().setItem(entry.getKey(), entry.getValue().clone());
                             }
+                            player.getInventory().setArmorContents(cloneItems(armorContents));
+                        } else {
+                            restoredItems.values().forEach(item -> drops.add(item.clone()));
+                            Arrays.stream(armorContents).filter(Objects::nonNull).forEach(item -> drops.add(item.clone()));
                         }
-                        drops.addAll(Arrays.asList(armorContents));
+                        inventoriesPlayer.clearInventorie(player.getUniqueId());
+                    } catch (RuntimeException error) {
+                        drops.clear();
+                        drops.addAll(originalDrops);
+                        player.getInventory().setContents(originalContents);
+                        this.plugin.getLogger().severe("Rolled back failed zMenu death recovery for "
+                            + player.getUniqueId() + ": " + error.getMessage());
                     }
                 }
             }
         }
+    }
+
+    private ItemStack[] cloneItems(ItemStack[] source) {
+        ItemStack[] copy = new ItemStack[source.length];
+        for (int index = 0; index < source.length; index++) {
+            copy[index] = source[index] == null ? null : source[index].clone();
+        }
+        return copy;
     }
 
     /**

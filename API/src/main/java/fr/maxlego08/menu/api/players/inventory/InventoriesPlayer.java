@@ -40,6 +40,15 @@ public interface InventoriesPlayer extends Listener {
     void forceGiveInventory(@NotNull Player player);
 
     /**
+     * Restores the stored inventory without running external-save reconciliation.
+     *
+     * @param player Player
+     */
+    default void forceGiveInventoryDirect(@NotNull Player player) {
+        forceGiveInventory(player);
+    }
+
+    /**
      * Check if the player has an inventory saved
      *
      * @param uniqueId Player {@link UUID}
@@ -55,6 +64,17 @@ public interface InventoriesPlayer extends Listener {
      */
     @NotNull
     Optional<InventoryPlayer> getPlayerInventory(@NotNull UUID uniqueId);
+
+    /**
+     * Returns a validated legacy recovery snapshot that is intentionally excluded from automatic restoration.
+     */
+    default @NotNull Optional<InventoryPlayer> getQuarantinedInventory(@NotNull UUID uniqueId) {
+        return Optional.empty();
+    }
+
+    default int quarantinedInventoryCount() {
+        return 0;
+    }
 
     @NotNull
     List<ItemStack> getInventory(@NotNull UUID uniqueId);
