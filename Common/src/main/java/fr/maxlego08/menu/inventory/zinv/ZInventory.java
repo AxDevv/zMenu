@@ -17,6 +17,7 @@ import fr.maxlego08.menu.api.requirement.ConditionalName;
 import fr.maxlego08.menu.api.requirement.Requirement;
 import fr.maxlego08.menu.api.utils.*;
 import fr.maxlego08.menu.common.utils.ZUtils;
+import fr.maxlego08.menu.common.utils.nms.NMSUtils;
 import fr.maxlego08.menu.inventory.inventories.InventoryDefault;
 import fr.maxlego08.menu.inventory.setter.ContainerInventorySetter;
 import org.bukkit.entity.Player;
@@ -262,7 +263,7 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
         InventoryEngine previousEngine = holder instanceof InventoryDefault inventoryHolder ? inventoryHolder : null;
         boolean previousStoredClear = isStoredClearInventory(previousEngine);
         boolean previousPacketClear = isPacketClearInventory(previousEngine);
-        boolean targetStoredClear = this.clearInventory && this.clearInvType == ClearInvType.DEFAULT;
+        boolean targetStoredClear = ClearInventorySnapshotPolicy.usesSavedInventory(this.clearInventory, this.clearInvType);
         ClearInventorySession session = PLAYER_CLEAR_INVENTORY_SESSIONS.get(playerUuid);
 
         if (session == null && previousStoredClear && savedBeforeOpen) {
@@ -308,13 +309,7 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
             }
 
             if (this.clearInventory && this.clearInvType == ClearInvType.PACKET_EVENT) {
-                if (previousEngine == null) {
-                    inventoriesPlayer.storeInventoryTemporary(player);
-                } else {
-                    inventoriesPlayer.storeInventoryTemporaryOrClear(player);
-                }
-            } else if (previousPacketClear) {
-                inventoriesPlayer.giveInventory(player);
+                projectPacketInventory(player);
             }
         }
 
@@ -384,6 +379,17 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
             playerInventory.setItem(slot, null);
         }
         playerInventory.setItemInOffHand(null);
+    }
+
+    private static void projectPacketInventory(Player player) {
+        var playerInventory = player.getInventory();
+        var removeItem = ClearInvType.PACKET_EVENT.getRemoveItem();
+        for (int slot = 0; slot < playerInventory.getStorageContents().length; slot++) {
+            removeItem.accept(player, slot, playerInventory);
+        }
+        if (!NMSUtils.isOneHand()) {
+            removeItem.accept(player, 40, playerInventory);
+        }
     }
 
     private static void finishStoredClearInventory(MenuPlugin menuPlugin,

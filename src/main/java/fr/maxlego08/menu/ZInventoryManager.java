@@ -77,6 +77,7 @@ import java.util.stream.Stream;
 
 public class ZInventoryManager extends ZUtils implements InventoryManager {
     private final PaginationManager paginationManager = new ZPaginationManager();
+    private final SkullProfileCache skullProfiles = new SkullProfileCache();
 
     private final Map<String, List<Inventory>> inventories = new HashMap<>();
     private final Map<Plugin, List<Class<? extends ButtonOption>>> buttonOptions = new HashMap<>();
@@ -101,6 +102,7 @@ public class ZInventoryManager extends ZUtils implements InventoryManager {
 
     @Override
     public void load() {
+        this.skullProfiles.clear();
         this.loadButtons();
         this.plugin.getPatternManager().loadActionsPatterns();
         this.plugin.getPatternManager().loadPatterns();
@@ -1017,8 +1019,11 @@ public class ZInventoryManager extends ZUtils implements InventoryManager {
 
         if (itemStack.getItemMeta() instanceof SkullMeta skullMeta) {
             performanceDebug.start("applyOwnerProfile");
-            skullMeta.setOwnerProfile(offlinePlayer.getPlayerProfile().getTextures().isEmpty() ? offlinePlayer.getPlayerProfile().update().join() : offlinePlayer.getPlayerProfile());
-            itemStack.setItemMeta(skullMeta);
+            var profile = this.skullProfiles.resolve(name, offlinePlayer.getPlayerProfile());
+            if (profile != null) {
+                skullMeta.setOwnerProfile(profile);
+                itemStack.setItemMeta(skullMeta);
+            }
             performanceDebug.end();
         }
 
