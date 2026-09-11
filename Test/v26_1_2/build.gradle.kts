@@ -3,6 +3,7 @@ plugins {
 }
 
 dependencies {
+    testImplementation("org.mockito:mockito-core:5.20.0")
     testImplementation(project(":Test:Base"))
     testImplementation(project(":"))
     testImplementation(project(":Hooks:Paper-26"))

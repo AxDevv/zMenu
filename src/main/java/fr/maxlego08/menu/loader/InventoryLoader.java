@@ -147,11 +147,13 @@ public class InventoryLoader extends ZUtils implements Loader<Inventory> {
         inventory.setClearInventory(configuration.getBoolean(path + "clear-inventory", configuration.getBoolean(path + "clearInventory", false)));
         inventory.setCancelItemPickup(configuration.getBoolean(path + "cancel-item-pickup", configuration.getBoolean(path + "cancelItemPickup", false)));
         inventory.setTargetPlayerNamePlaceholder(configuration.getString(path + "target-player-name-placeholder", configuration.getString(path + "target_player_name_placeholder", "%player_name%")));
-        String clearInvTypeStr = configuration.getString("clear-inventory-type", "DEFAULT");
+        String clearInvTypeStr = inventory.clearInventory() ? "PACKET_EVENT"
+            : configuration.getString(path + "clear-inventory-type", "DEFAULT");
         try {
             ClearInvType clearInvType = ClearInvType.valueOf(clearInvTypeStr.toUpperCase(Locale.ROOT));
             if (clearInvType.hasRequiredPlugin() && !this.plugin.getServer().getPluginManager().isPluginEnabled(clearInvType.getRequiredPlugin())) {
-                clearInvType = ClearInvType.DEFAULT;
+                // Never fall back to removing real items when PacketEvents is unavailable.
+                if (!inventory.clearInventory()) clearInvType = ClearInvType.DEFAULT;
             }
             inventory.setClearInvType(clearInvType);
         } catch (Exception e) {

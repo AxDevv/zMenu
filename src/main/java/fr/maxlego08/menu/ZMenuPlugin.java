@@ -138,6 +138,7 @@ public class ZMenuPlugin extends ZPlugin implements fr.maxlego08.menu.api.MenuPl
     private FontImage fontImage = new EmptyFont();
     private MetaUpdater metaUpdater;
     private PacketManager packetManager;
+    private PacketEventPlayerInventoryManager playerInventoryProjection;
 
     public ZMenuPlugin() {
         this(false);
@@ -352,7 +353,10 @@ public class ZMenuPlugin extends ZPlugin implements fr.maxlego08.menu.api.MenuPl
         this.dataManager.loadDefaultValues();
 
 //         this.inventoryManager.registerInventoryListener(this.packetUtils);
-        if (this.isActive(Plugins.PACKETEVENTS)) this.inventoryManager.registerInventoryListener(new PacketEventPlayerInventoryManager(this));
+        if (this.isActive(Plugins.PACKETEVENTS)) {
+            this.playerInventoryProjection = new PacketEventPlayerInventoryManager(this);
+            this.inventoryManager.registerInventoryListener(this.playerInventoryProjection);
+        }
 
         if (this.packetManager != null) {
             this.packetManager.onPostEnable();
@@ -452,6 +456,8 @@ public class ZMenuPlugin extends ZPlugin implements fr.maxlego08.menu.api.MenuPl
     public void onDisable() {
 
         context.shutdown();
+
+        if (this.playerInventoryProjection != null) this.playerInventoryProjection.shutdown();
 
         if (this.packetManager != null) {
             this.packetManager.onDisable();

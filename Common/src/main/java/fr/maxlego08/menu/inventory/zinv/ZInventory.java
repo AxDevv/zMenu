@@ -21,7 +21,6 @@ import fr.maxlego08.menu.inventory.setter.ContainerInventorySetter;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.InventoryHolder;
-import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -224,6 +223,12 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
 
     @Override
     public InventoryResult openInventory(Player player, InventoryEngine inventoryDefault) {
+        if (this.clearInventory && (this.clearInvType != ClearInvType.PACKET_EVENT
+            || !inventoryDefault.getPlugin().getServer().getPluginManager().isPluginEnabled("packetevents"))) {
+            inventoryDefault.getPlugin().getLogger().warning("Cannot open " + this.getName()
+                + ": hidden player inventories require PacketEvents on SaoWorld");
+            return InventoryResult.ERROR;
+        }
         if (this.openRequirement != null && !this.openRequirement.execute(player, null, inventoryDefault, new Placeholders())) {
             return InventoryResult.PERMISSION;
         }
@@ -235,20 +240,12 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
             this.clearPlayerInventoryButtons(player, inventoryHolder);
 
             if (inventoryHolder.getMenuInventory() instanceof ContainerInventory containerInventory && containerInventory.clearInventory() && !this.clearInventory) {
-                inventoriesPlayer.giveInventory(player);
+                containerInventory.getClearInvType().getOnInventoryClose().accept(inventoriesPlayer, player);
             } else if (this.clearInventory) {
-                if (this.clearInvType == ClearInvType.DEFAULT){
-                    inventoriesPlayer.storeInventory(player);
-                } else {
-                    inventoriesPlayer.storeInventoryTemporaryOrClear(player);
-                }
+                inventoriesPlayer.storeInventoryTemporaryOrClear(player);
             }
         } else if (this.clearInventory) {
-            if (this.clearInvType == ClearInvType.DEFAULT) {
-                inventoriesPlayer.storeInventory(player);
-            } else {
-                inventoriesPlayer.storeInventoryTemporary(player);
-            }
+            inventoriesPlayer.storeInventoryTemporary(player);
         }
 
         var placeholders = new Placeholders();
@@ -261,40 +258,12 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
         for (Button button : inventoryDefault.getButtons()) {
             if (button.isPlayerInventory()) {
                 for (int slot : button.getSlots()) {
-                    if (slot >= 0 && slot <= 36) {
-                        this.clearInvType.getOnButtonClear().accept(player, slot);
+                    if (slot >= 0 && slot < 36) {
+                        inventoryDefault.getClearInvType().getOnButtonClear().accept(player, slot);
                     }
                 }
             }
         }
-    }
-
-    private List<ItemStack> collectSessionItems(Player player, InventoryEngine inventoryDefault) {
-        Set<Integer> buttonSlots = new HashSet<>(inventoryDefault.getPlayerInventoryItems().keySet());
-        for (Button button : inventoryDefault.getButtons()) {
-            if (button.isPlayerInventory()) {
-                buttonSlots.addAll(button.getSlots());
-            }
-        }
-
-        List<ItemStack> sessionItems = new ArrayList<>();
-        var playerInventory = player.getInventory();
-        int storageSize = Math.min(playerInventory.getSize(), 36);
-        for (int slot = 0; slot < storageSize; slot++) {
-            if (buttonSlots.contains(slot)) continue;
-            ItemStack item = playerInventory.getItem(slot);
-            if (item != null && !item.getType().isAir()) {
-                sessionItems.add(item.clone());
-                playerInventory.setItem(slot, null);
-            }
-        }
-        return sessionItems;
-    }
-
-    private void restoreSessionItems(Player player, List<ItemStack> sessionItems) {
-        if (sessionItems.isEmpty()) return;
-        Map<Integer, ItemStack> leftovers = player.getInventory().addItem(sessionItems.toArray(new ItemStack[0]));
-        leftovers.values().forEach(leftover -> player.getWorld().dropItemNaturally(player.getLocation(), leftover));
     }
 
     @Override
@@ -309,16 +278,13 @@ public class ZInventory extends ZUtils implements ContainerInventorySetter {
         menuPlugin.getScheduler().runAtEntityLater(player, task -> {
             InventoryHolder newHolder = CompatibilityUtil.getTopInventory(player).getHolder();
             boolean isInNewzMenuInventory = newHolder instanceof InventoryDefault;
-            if (newHolder != null && !(newHolder instanceof InventoryDefault)) {
-
-                List<ItemStack> sessionItems = this.clearInventory && this.clearInvType != ClearInvType.PACKET_EVENT ? this.collectSessionItems(player, inventoryDefault) : Collections.emptyList();
+            if (!(newHolder instanceof InventoryDefault)) {
 
                 this.clearPlayerInventoryButtons(player, inventoryDefault);
 
                 if (this.clearInventory) {
                     InventoriesPlayer inventoriesPlayer = menuPlugin.getInventoriesPlayer();
                     this.clearInvType.getOnInventoryClose().accept(inventoriesPlayer, player);
-                    this.restoreSessionItems(player, sessionItems);
                 }
             }
             var placeholders = new Placeholders();

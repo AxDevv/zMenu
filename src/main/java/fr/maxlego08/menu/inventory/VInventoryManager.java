@@ -11,19 +11,15 @@ import fr.maxlego08.menu.api.engine.ItemButton;
 import fr.maxlego08.menu.api.exceptions.InventoryAlreadyExistException;
 import fr.maxlego08.menu.api.exceptions.InventoryOpenException;
 import fr.maxlego08.menu.api.inventory.ContainerInventory;
-import fr.maxlego08.menu.api.players.inventory.InventoriesPlayer;
-import fr.maxlego08.menu.api.players.inventory.InventoryPlayer;
 import fr.maxlego08.menu.api.utils.ClearInvType;
 import fr.maxlego08.menu.api.utils.CompatibilityUtil;
 import fr.maxlego08.menu.api.utils.EnumInventory;
 import fr.maxlego08.menu.api.utils.Message;
-import fr.maxlego08.menu.common.utils.nms.ItemStackUtils;
 import fr.maxlego08.menu.inventory.inventories.InventoryDefault;
 import fr.maxlego08.menu.listener.ListenerAdapter;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityPickupItemEvent;
-import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -32,7 +28,6 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
-import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -150,11 +145,13 @@ public class VInventoryManager extends ListenerAdapter implements VInvManager {
 
         if (holder instanceof VInventory inventory) {
 
-            event.setCancelled(inventory.isDisableClick());
+            boolean hiddenInventory = inventory instanceof InventoryEngine engine
+                && engine.getMenuInventory() instanceof ContainerInventory menu && menu.clearInventory();
+            event.setCancelled(hiddenInventory || inventory.isDisableClick());
 
             if (event.getClickedInventory().getType().equals(InventoryType.PLAYER)) {
 
-                event.setCancelled(inventory.isDisablePlayerInventoryClick());
+                event.setCancelled(hiddenInventory || inventory.isDisablePlayerInventoryClick());
 
                 inventory.onInventoryClick(event, this.plugin, player);
                 this.handleClick(true, player, inventory, event);
@@ -222,51 +219,6 @@ public class VInventoryManager extends ListenerAdapter implements VInvManager {
         }
     }
 
-    @Override
-    protected void onDeath(PlayerDeathEvent event, Player player) {
-        InventoryHolder holder = CompatibilityUtil.getTopInventory(player).getHolder();
-        if (holder instanceof VInventory vInventory) {
-            if (vInventory instanceof InventoryDefault inventoryDefault) {
-                if (inventoryDefault.getMenuInventory() instanceof ContainerInventory containerInventory && containerInventory.clearInventory() && containerInventory.getClearInvType() == ClearInvType.DEFAULT) {
-                    InventoriesPlayer inventoriesPlayer = this.plugin.getInventoriesPlayer();
-                    Optional<InventoryPlayer> playerInventory = inventoriesPlayer.getPlayerInventory(player.getUniqueId());
-                    inventoriesPlayer.clearInventorie(player.getUniqueId());
-                    List<ItemStack> drops = event.getDrops();
-                    drops.clear();
-                    ItemStack[] armorContents = player.getInventory().getArmorContents();
-
-                    Map<Integer, String> items;
-                    if (playerInventory.isPresent()) {
-                        InventoryPlayer inventoryPlayer = playerInventory.get();
-                        items = inventoryPlayer.getItems();
-                    } else {
-                        items = Collections.emptyMap();
-                    }
-                    if (event.getKeepInventory()) {
-                        player.getInventory().clear();
-                        for (var entry : items.entrySet()) {
-                            int slot = entry.getKey();
-                            String serializedItem = entry.getValue();
-                            ItemStack itemStack = ItemStackUtils.deserializeItemStack(serializedItem);
-                            if (itemStack != null) {
-                                player.getInventory().setItem(slot, itemStack);
-                            }
-                        }
-                        player.getInventory().setArmorContents(armorContents);
-                    } else {
-                        for (var entry : items.entrySet()) {
-                            String serializedItem = entry.getValue();
-                            ItemStack itemStack = ItemStackUtils.deserializeItemStack(serializedItem);
-                            if (itemStack != null) {
-                                drops.add(itemStack);
-                            }
-                        }
-                        drops.addAll(Arrays.asList(armorContents));
-                    }
-                }
-            }
-        }
-    }
 
     /**
      * @param id - Inventory I'd

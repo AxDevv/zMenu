@@ -9,7 +9,7 @@ version = "1.1.1.8"
 
 extra.set("targetFolder", file("target/"))
 extra.set("apiFolder", file("target-api/"))
-extra.set("classifier", System.getProperty("archive.classifier"))
+extra.set("classifier", System.getProperty("archive.classifier", "saoworld.1"))
 extra.set("sha", System.getProperty("github.sha"))
 
 val rootLibs = libs
@@ -197,6 +197,8 @@ tasks {
             archiveClassifier.set(rootProject.extra.properties["classifier"] as String?)
         }
         destinationDirectory.set(rootProject.extra["targetFolder"] as File)
+        manifest.attributes("SaoWorld-Patch" to "packet-projection-1",
+            "Upstream-Commit" to "7de6a902a31eb7bfb96154f210b2aa0e2aae99e5")
     }
 
     build {
@@ -205,6 +207,7 @@ tasks {
 
 
     processResources {
+        inputs.property("pluginVersion", project.version)
         from("resources")
         filesMatching(listOf("plugin.yml", "paper-plugin.yml")) {
             expand("version" to project.version)

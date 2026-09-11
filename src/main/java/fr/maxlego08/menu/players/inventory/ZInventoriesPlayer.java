@@ -3,162 +3,78 @@ package fr.maxlego08.menu.players.inventory;
 import fr.maxlego08.menu.ZMenuPlugin;
 import fr.maxlego08.menu.api.players.inventory.InventoriesPlayer;
 import fr.maxlego08.menu.api.players.inventory.InventoryPlayer;
-import fr.maxlego08.menu.api.storage.dto.InventoryDTO;
-import org.bukkit.Bukkit;
+import fr.maxlego08.menu.api.utils.ClearInvType;
+import fr.maxlego08.menu.common.utils.nms.NMSUtils;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
-import org.jetbrains.annotations.NotNull;
-import org.jspecify.annotations.NonNull;
 
-import java.util.*;
-import java.util.function.BiConsumer;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
+/** Keeps the upstream service API while SaoWorld inventories remain owned by Core. */
 public class ZInventoriesPlayer implements InventoriesPlayer {
-
-    private final Map<UUID, InventoryPlayer> inventories = new HashMap<>();
     private final ZMenuPlugin plugin;
-    private long lastSave;
 
     public ZInventoriesPlayer(ZMenuPlugin plugin) {
         this.plugin = plugin;
     }
 
     @Override
-    public void storeInventory(@NonNull Player player) {
-        if (this.hasSavedInventory(player.getUniqueId())) {
-            // Something is wrong
-            // Logger.info("The plugin tries to save an inventory while the player already has an inventory saved!");
-            return;
-        }
-
-        ZInventoryPlayer inventoryPlayer = new ZInventoryPlayer(this.plugin);
-        inventoryPlayer.storeInventory(player);
-        this.inventories.put(player.getUniqueId(), inventoryPlayer);
-
-        this.plugin.getStorageManager().storeInventory(player.getUniqueId(), inventoryPlayer);
+    public void storeInventory(Player player) {
+        throw new UnsupportedOperationException("Physical inventory storage is disabled on SaoWorld");
     }
 
     @Override
-    public void storeInventoryTemporary(@NonNull Player player) {
-        if (this.hasSavedInventory(player.getUniqueId())) {
-            return;
-        }
-
-        ZInventoryPlayer inventoryPlayer = new ZInventoryPlayer(this.plugin);
-        inventoryPlayer.storeInventory(player, true);
-        this.inventories.put(player.getUniqueId(), inventoryPlayer);
+    public void storeInventoryTemporary(Player player) {
+        var inventory = player.getInventory();
+        var remove = ClearInvType.PACKET_EVENT.getRemoveItem();
+        for (int slot = 0; slot < 36; slot++) remove.accept(player, slot, inventory);
+        if (!NMSUtils.isOneHand()) remove.accept(player, 40, inventory);
     }
 
     @Override
-    public void storeInventoryTemporaryOrClear(@NotNull Player player) {
-        Optional<InventoryPlayer> playerInventory = this.getPlayerInventory(player.getUniqueId());
-        if (playerInventory.isPresent()) {
-            playerInventory.get().clearInventory(player);
-        } else {
-            this.storeInventoryTemporary(player);
-        }
-    }
-
-    private void restoreInventory(Player player, BiConsumer<InventoryPlayer, Player> restoreAction) {
-        Optional<InventoryPlayer> optional = this.getPlayerInventory(player.getUniqueId());
-        if (optional.isPresent()) {
-            InventoryPlayer inventoryPlayer = optional.get();
-            restoreAction.accept(inventoryPlayer, player);
-            this.inventories.remove(player.getUniqueId());
-            this.plugin.getStorageManager().removeInventory(player.getUniqueId());
-        }
+    public void storeInventoryTemporaryOrClear(Player player) {
+        storeInventoryTemporary(player);
     }
 
     @Override
-    public void giveInventory(@NonNull Player player) {
-        this.restoreInventory(player, InventoryPlayer::giveInventory);
+    public void giveInventory(Player player) {
+        player.updateInventory();
     }
 
     @Override
-    public void forceGiveInventory(@NonNull Player player) {
-        this.restoreInventory(player, InventoryPlayer::forceGiveInventory);
+    public void forceGiveInventory(Player player) {
+        giveInventory(player);
     }
 
     @Override
-    public boolean hasSavedInventory(@NonNull UUID uniqueId) {
-        return this.inventories.containsKey(uniqueId);
+    public boolean hasSavedInventory(UUID uniqueId) {
+        return false;
     }
 
     @Override
-    public @NonNull Optional<InventoryPlayer> getPlayerInventory(@NonNull UUID uniqueId) {
-        return Optional.ofNullable(this.inventories.getOrDefault(uniqueId, null));
+    public Optional<InventoryPlayer> getPlayerInventory(UUID uniqueId) {
+        return Optional.empty();
     }
 
     @Override
-    public @NonNull List<ItemStack> getInventory(@NonNull UUID uniqueId) {
-        Optional<InventoryPlayer> optional = this.getPlayerInventory(uniqueId);
-        if (optional.isPresent()) {
-            InventoryPlayer inventoryPlayer = optional.get();
-            return inventoryPlayer.getItemStacks();
-        }
-        return Collections.emptyList();
+    public List<ItemStack> getInventory(UUID uniqueId) {
+        return List.of();
     }
 
     @Override
-    public void clearInventorie(@NonNull UUID uniqueId) {
-        this.inventories.remove(uniqueId);
-        this.plugin.getStorageManager().removeInventory(uniqueId);
-    }
-
-    @EventHandler
-    public void onDisconnect(PlayerQuitEvent event) {
-        Player player = event.getPlayer();
-        Optional<InventoryPlayer> playerInventory = this.getPlayerInventory(player.getUniqueId());
-        if (playerInventory.isPresent()) {
-            if (playerInventory.get().isPermanent())
-                this.forceGiveInventory(player);
-            else
-                this.clearInventorie(player.getUniqueId());
-        }
-    }
-
-    @EventHandler
-    public void onJoin(PlayerJoinEvent event) {
-        Player player = event.getPlayer();
-        Optional<InventoryPlayer> playerInventory = this.getPlayerInventory(player.getUniqueId());
-        if (playerInventory.isPresent()) {
-            if (playerInventory.get().isPermanent())
-                this.giveInventory(player);
-        }
+    public void clearInventorie(UUID uniqueId) {
+        // No snapshot exists. Never delete legacy recovery rows.
     }
 
     @Override
     public void loadInventories() {
-        Map<UUID, ZInventoryPlayer> loadedInventories = new HashMap<>();
-        for (InventoryDTO inventory : this.plugin.getStorageManager().loadInventories()) {
-            var inventoryPlayer = new ZInventoryPlayer(this.plugin);
-            String[] serializedItems = inventory.inventory().split(";");
-            for (String serializedItem : serializedItems) {
-                String[] parts = serializedItem.split(":");
-                if (parts.length == 2 && !parts[0].isEmpty() && !parts[1].isEmpty()) {
-                    try {
-                        int slot = Integer.parseInt(parts[0]);
-                        inventoryPlayer.getItems().put(slot, parts[1]);
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-            }
-            loadedInventories.put(inventory.player_id(), inventoryPlayer);
-        }
-        this.inventories.putAll(loadedInventories);
+        plugin.getLogger().info("SaoWorld packet-only inventories enabled; legacy recovery rows are preserved and never restored automatically");
     }
 
     @Override
     public void restoreAllInventories() {
-        new HashMap<>(this.inventories).forEach((uuid, inventoryPlayer) -> {
-            Player player = Bukkit.getPlayer(uuid);
-            if (player != null && player.isOnline()) {
-                inventoryPlayer.forceGiveInventory(player);
-            }
-            this.inventories.remove(uuid);
-        });
+        // Live items have never left the player inventory.
     }
 }
