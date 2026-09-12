@@ -5,11 +5,13 @@ import fr.maxlego08.menu.api.InventoryManager;
 import fr.maxlego08.menu.api.button.Button;
 import fr.maxlego08.menu.api.command.CommandManager;
 import fr.maxlego08.menu.api.engine.InventoryEngine;
+import fr.maxlego08.menu.api.utils.CompatibilityUtil;
 import fr.maxlego08.menu.api.utils.Message;
 import fr.maxlego08.menu.api.utils.Placeholders;
 import fr.maxlego08.menu.common.utils.ActionHelper;
 import fr.maxlego08.menu.zcore.utils.InventoryArgument;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.InventoryHolder;
 import org.jspecify.annotations.NonNull;
 
 import java.util.List;
@@ -40,6 +42,10 @@ public class InventoryAction extends ActionHelper {
     protected void execute(@NonNull Player player, Button button, @NonNull InventoryEngine inventory, @NonNull Placeholders placeholders) {
 
         inventory.getPlugin().getScheduler().runNextTick(w -> {
+            InventoryHolder holder = CompatibilityUtil.getTopInventory(player).getHolder();
+            if (inventory.isClose() || holder != inventory) {
+                return;
+            }
 
             Inventory fromInventory = inventory.getMenuInventory();
             List<Inventory> oldInventories = inventory.getOldInventories();

@@ -9,6 +9,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 public interface StorageManager extends Listener {
 
@@ -35,4 +36,8 @@ public interface StorageManager extends Listener {
     void storeInventory(@NotNull UUID uuid,@NotNull InventoryPlayer inventoryPlayer);
 
     void removeInventory(@NotNull UUID uuid);
+
+    default CompletableFuture<Void> flushInventoryOperations() {
+        return CompletableFuture.completedFuture(null);
+    }
 }

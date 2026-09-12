@@ -28,13 +28,17 @@ import org.jspecify.annotations.NonNull;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 public class ZStorageManager implements StorageManager {
 
     private final MenuPlugin plugin;
     private final TypeSafeCache cache = new TypeSafeCache();
+    private final Map<UUID, CompletableFuture<Void>> inventoryOperations = new ConcurrentHashMap<>();
     private RequestHelper requestHelper;
     private boolean isEnable = true;
 
@@ -227,7 +231,8 @@ public class ZStorageManager implements StorageManager {
 
         if (!this.isEnable()) return;
 
-        this.plugin.getScheduler().runAsync(w -> this.requestHelper.delete(Tables.PLAYER_INVENTORIES, table -> table.where("player_id", uuid)));
+        this.queueInventoryOperation(uuid, () ->
+            this.requestHelper.delete(Tables.PLAYER_INVENTORIES, table -> table.where("player_id", uuid)));
     }
 
     @Override
@@ -235,9 +240,51 @@ public class ZStorageManager implements StorageManager {
 
         if (!this.isEnable()) return;
 
-        this.plugin.getScheduler().runAsync(w -> this.requestHelper.insert(Tables.PLAYER_INVENTORIES, table -> {
+        this.queueInventoryOperation(uuid, () -> this.requestHelper.insert(Tables.PLAYER_INVENTORIES, table -> {
             table.uuid("player_id", uuid);
             table.string("inventory", inventoryPlayer.toInventoryString());
         }));
+    }
+
+    @Override
+    public CompletableFuture<Void> flushInventoryOperations() {
+        CompletableFuture<?>[] pending = this.inventoryOperations.values().toArray(CompletableFuture[]::new);
+        if (pending.length == 0) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return CompletableFuture.allOf(pending).thenCompose(ignored -> this.flushInventoryOperations());
+    }
+
+    private CompletableFuture<Void> queueInventoryOperation(UUID uuid, Runnable operation) {
+        CompletableFuture<Void> queued = this.inventoryOperations.compute(uuid, (ignored, current) -> {
+            CompletableFuture<Void> previous = current == null
+                ? CompletableFuture.completedFuture(null)
+                : current.handle((value, error) -> null);
+            return previous.thenCompose(value -> this.runInventoryOperation(operation));
+        });
+        queued.whenComplete((ignored, error) -> {
+            this.inventoryOperations.remove(uuid, queued);
+            if (error != null) {
+                this.plugin.getLogger().severe("zMenu inventory recovery storage failed for " + uuid + ": " + error.getMessage());
+            }
+        });
+        return queued;
+    }
+
+    private CompletableFuture<Void> runInventoryOperation(Runnable operation) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        try {
+            this.plugin.getScheduler().runAsync(task -> {
+                try {
+                    operation.run();
+                    future.complete(null);
+                } catch (Throwable error) {
+                    future.completeExceptionally(error);
+                }
+            });
+        } catch (Throwable error) {
+            future.completeExceptionally(error);
+        }
+        return future;
     }
 }

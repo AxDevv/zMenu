@@ -5,10 +5,12 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSe
 import fr.maxlego08.menu.api.InventoryListener;
 import fr.maxlego08.menu.api.MenuPlugin;
 import fr.maxlego08.menu.api.engine.BaseInventory;
+import fr.maxlego08.menu.api.engine.InventoryEngine;
 import fr.maxlego08.menu.api.engine.ItemButton;
-import fr.maxlego08.menu.api.players.inventory.InventoryPlayer;
+import fr.maxlego08.menu.api.inventory.ContainerInventory;
+import fr.maxlego08.menu.api.players.inventory.InventoriesPlayer;
 import fr.maxlego08.menu.api.utils.ClearInvType;
-import fr.maxlego08.menu.common.utils.nms.ItemStackUtils;
+import fr.maxlego08.menu.common.utils.nms.NMSUtils;
 import io.github.retrooper.packetevents.util.SpigotConversionUtil;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -17,7 +19,6 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 public class PacketEventPlayerInventoryManager implements InventoryListener {
@@ -28,18 +29,7 @@ public class PacketEventPlayerInventoryManager implements InventoryListener {
         this.plugin = plugin;
         ClearInvType packetEvent = ClearInvType.PACKET_EVENT;
         packetEvent.setOnButtonClear((player, slot)->this.addItemInstantly(player,slot,new ItemStack(Material.AIR)));
-        packetEvent.setOnInventoryClose(((inventoriesPlayer, player) -> {
-            Optional<InventoryPlayer> playerInventory = inventoriesPlayer.getPlayerInventory(player.getUniqueId());
-            if (playerInventory.isPresent()) {
-                Map<Integer, String> items = playerInventory.get().getItems();
-                for (var entry : items.entrySet()) {
-                    int slot = entry.getKey();
-                    ItemStack itemStack = ItemStackUtils.deserializeItemStack(entry.getValue());
-                    this.addItemInstantly(player, slot,itemStack);
-                }
-            }
-            inventoriesPlayer.clearInventorie(player.getUniqueId());
-        }));
+        packetEvent.setOnInventoryClose(this::restoreProjectedInventory);
         packetEvent.setRemoveItem((player, slot, playerInventory) -> this.addItemLater(player, slot, new ItemStack(Material.AIR)));
     }
 
@@ -71,9 +61,28 @@ public class PacketEventPlayerInventoryManager implements InventoryListener {
         }
     }
 
+    @Override
+    public void onInventorySwitch(Player player, InventoryEngine oldInventoryEngine, InventoryEngine newInventoryEngine) {
+        if (usesPacketProjection(oldInventoryEngine) && !usesPacketProjection(newInventoryEngine)) {
+            restoreProjectedInventory(this.plugin.getInventoriesPlayer(), player);
+        }
+    }
+
     public void onButtonClick(Player player, ItemButton button){
         if (button.isInPlayerInventory() && button.getBaseInventory().getClearInvType() == ClearInvType.PACKET_EVENT) {
             this.addItemInstantly(player, button.getSlot(), button.getDisplayItem());
+            BaseInventory clickedInventory = button.getBaseInventory();
+            int clickedSlot = button.getSlot();
+            this.plugin.getScheduler().runAtEntityLater(player, () -> {
+                if (!player.isOnline()
+                    || player.getOpenInventory().getTopInventory().getHolder() != clickedInventory) {
+                    return;
+                }
+                ItemButton currentButton = clickedInventory.getPlayerInventoryItems().get(clickedSlot);
+                if (currentButton != null) {
+                    this.addItemInstantly(player, clickedSlot, currentButton.getDisplayItem());
+                }
+            }, 1);
         }
     }
 
@@ -84,5 +93,30 @@ public class PacketEventPlayerInventoryManager implements InventoryListener {
 
     public void addItemLater(@NotNull Player player, int slot, @NotNull ItemStack itemStack){
         this.pendingInventoryUpdates.computeIfAbsent(player.getUniqueId(), k -> new HashMap<>()).put(slot, new WrapperPlayServerSetPlayerInventory(slot, itemStack.getType() == Material.AIR ? null : SpigotConversionUtil.fromBukkitItemStack(itemStack)));
+    }
+
+    private void restoreProjectedInventory(InventoriesPlayer inventoriesPlayer, Player player) {
+        UUID playerUuid = player.getUniqueId();
+        this.pendingInventoryUpdates.remove(playerUuid);
+        var playerInventory = player.getInventory();
+        ItemStack[] storageContents = playerInventory.getStorageContents();
+        for (int slot = 0; slot < storageContents.length; slot++) {
+            ItemStack itemStack = storageContents[slot];
+            this.addItemInstantly(player, slot, itemStack == null ? new ItemStack(Material.AIR) : itemStack);
+        }
+        if (!NMSUtils.isOneHand()) {
+            ItemStack offHand = playerInventory.getItemInOffHand();
+            this.addItemInstantly(player, 40, offHand.getType() == Material.AIR ? new ItemStack(Material.AIR) : offHand);
+        }
+        inventoriesPlayer.getPlayerInventory(playerUuid)
+            .filter(inventory -> !inventory.isPermanent())
+            .ifPresent(inventory -> inventoriesPlayer.clearInventorie(playerUuid));
+    }
+
+    private static boolean usesPacketProjection(BaseInventory inventory) {
+        return inventory instanceof InventoryEngine inventoryEngine
+            && inventoryEngine.getMenuInventory() instanceof ContainerInventory containerInventory
+            && containerInventory.clearInventory()
+            && containerInventory.getClearInvType() == ClearInvType.PACKET_EVENT;
     }
 }

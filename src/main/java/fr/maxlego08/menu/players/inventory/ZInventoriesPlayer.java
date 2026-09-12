@@ -4,9 +4,12 @@ import fr.maxlego08.menu.ZMenuPlugin;
 import fr.maxlego08.menu.api.players.inventory.InventoriesPlayer;
 import fr.maxlego08.menu.api.players.inventory.InventoryPlayer;
 import fr.maxlego08.menu.api.storage.dto.InventoryDTO;
+import fr.maxlego08.menu.common.utils.nms.ItemStackUtils;
+import fr.maxlego08.menu.inventory.zinv.ZInventory;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
@@ -19,6 +22,7 @@ import java.util.function.BiConsumer;
 public class ZInventoriesPlayer implements InventoriesPlayer {
 
     private final Map<UUID, InventoryPlayer> inventories = new HashMap<>();
+    private final Map<UUID, InventoryPlayer> quarantinedInventories = new HashMap<>();
     private final ZMenuPlugin plugin;
     private long lastSave;
 
@@ -37,8 +41,6 @@ public class ZInventoriesPlayer implements InventoriesPlayer {
         ZInventoryPlayer inventoryPlayer = new ZInventoryPlayer(this.plugin);
         inventoryPlayer.storeInventory(player);
         this.inventories.put(player.getUniqueId(), inventoryPlayer);
-
-        this.plugin.getStorageManager().storeInventory(player.getUniqueId(), inventoryPlayer);
     }
 
     @Override
@@ -79,6 +81,14 @@ public class ZInventoriesPlayer implements InventoriesPlayer {
 
     @Override
     public void forceGiveInventory(@NonNull Player player) {
+        if (ZInventory.restorePlayerInventoryBeforeExternalSave(this.plugin, player, "external-force-restore")) {
+            return;
+        }
+        this.forceGiveInventoryDirect(player);
+    }
+
+    @Override
+    public void forceGiveInventoryDirect(@NonNull Player player) {
         this.restoreInventory(player, InventoryPlayer::forceGiveInventory);
     }
 
@@ -90,6 +100,16 @@ public class ZInventoriesPlayer implements InventoriesPlayer {
     @Override
     public @NonNull Optional<InventoryPlayer> getPlayerInventory(@NonNull UUID uniqueId) {
         return Optional.ofNullable(this.inventories.getOrDefault(uniqueId, null));
+    }
+
+    @Override
+    public @NonNull Optional<InventoryPlayer> getQuarantinedInventory(@NonNull UUID uniqueId) {
+        return Optional.ofNullable(this.quarantinedInventories.get(uniqueId));
+    }
+
+    @Override
+    public int quarantinedInventoryCount() {
+        return this.quarantinedInventories.size();
     }
 
     @Override
@@ -108,9 +128,12 @@ public class ZInventoriesPlayer implements InventoriesPlayer {
         this.plugin.getStorageManager().removeInventory(uniqueId);
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.LOWEST)
     public void onDisconnect(PlayerQuitEvent event) {
         Player player = event.getPlayer();
+        if (ZInventory.restorePlayerInventoryBeforeExternalSave(this.plugin, player, "player-quit")) {
+            return;
+        }
         Optional<InventoryPlayer> playerInventory = this.getPlayerInventory(player.getUniqueId());
         if (playerInventory.isPresent()) {
             if (playerInventory.get().isPermanent())
@@ -125,30 +148,72 @@ public class ZInventoriesPlayer implements InventoriesPlayer {
         Player player = event.getPlayer();
         Optional<InventoryPlayer> playerInventory = this.getPlayerInventory(player.getUniqueId());
         if (playerInventory.isPresent()) {
-            if (playerInventory.get().isPermanent())
-                this.giveInventory(player);
+            if (playerInventory.get().isPermanent()) {
+                ZInventory.restorePlayerInventoryBeforeExternalSave(this.plugin, player, "player-join");
+            }
         }
     }
 
     @Override
     public void loadInventories() {
-        Map<UUID, ZInventoryPlayer> loadedInventories = new HashMap<>();
+        this.quarantinedInventories.clear();
+        Map<UUID, List<InventoryDTO>> recoveries = new HashMap<>();
         for (InventoryDTO inventory : this.plugin.getStorageManager().loadInventories()) {
-            var inventoryPlayer = new ZInventoryPlayer(this.plugin);
-            String[] serializedItems = inventory.inventory().split(";");
-            for (String serializedItem : serializedItems) {
-                String[] parts = serializedItem.split(":");
-                if (parts.length == 2 && !parts[0].isEmpty() && !parts[1].isEmpty()) {
-                    try {
-                        int slot = Integer.parseInt(parts[0]);
-                        inventoryPlayer.getItems().put(slot, parts[1]);
-                    } catch (NumberFormatException ignored) {
-                    }
+            if (inventory == null || inventory.player_id() == null || inventory.inventory() == null) {
+                this.plugin.getLogger().severe("Ignored malformed zMenu inventory recovery row");
+                continue;
+            }
+            recoveries.computeIfAbsent(inventory.player_id(), ignored -> new ArrayList<>()).add(inventory);
+        }
+
+        Map<UUID, ZInventoryPlayer> loadedInventories = new HashMap<>();
+        recoveries.forEach((uuid, rows) -> {
+            long distinctPayloads = rows.stream().map(InventoryDTO::inventory).distinct().count();
+            if (distinctPayloads > 1) {
+                this.plugin.getLogger().severe("Quarantined conflicting zMenu inventory recovery rows for "
+                    + uuid + " count=" + rows.size());
+                return;
+            }
+            this.decodeRecovery(uuid, rows.getFirst().inventory()).ifPresent(inventoryPlayer ->
+                loadedInventories.put(uuid, inventoryPlayer));
+        });
+        this.quarantinedInventories.putAll(loadedInventories);
+        if (!loadedInventories.isEmpty()) {
+            this.plugin.getLogger().severe("Quarantined " + loadedInventories.size()
+                + " legacy zMenu inventory recoveries; automatic restoration is disabled because "
+                + "legacy rows have no server/session fence. Back up and reconcile them explicitly.");
+        }
+    }
+
+    private Optional<ZInventoryPlayer> decodeRecovery(UUID uuid, String payload) {
+        ZInventoryPlayer inventoryPlayer = new ZInventoryPlayer(this.plugin);
+        if (payload.isEmpty()) {
+            return Optional.of(inventoryPlayer);
+        }
+
+        try {
+            for (String serializedItem : payload.split(";")) {
+                String[] parts = serializedItem.split(":", 2);
+                if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
+                    throw new IllegalArgumentException("invalid entry");
+                }
+                int slot = Integer.parseInt(parts[0]);
+                if ((slot < 0 || slot >= 36) && slot != 40) {
+                    throw new IllegalArgumentException("invalid slot");
+                }
+                if (inventoryPlayer.getItems().putIfAbsent(slot, parts[1]) != null) {
+                    throw new IllegalArgumentException("duplicate slot");
+                }
+                if (ItemStackUtils.deserializeItemStack(parts[1]) == null) {
+                    throw new IllegalArgumentException("invalid item");
                 }
             }
-            loadedInventories.put(inventory.player_id(), inventoryPlayer);
+            return Optional.of(inventoryPlayer);
+        } catch (RuntimeException error) {
+            this.plugin.getLogger().severe("Quarantined invalid zMenu inventory recovery row for " + uuid
+                + ": " + error.getMessage());
+            return Optional.empty();
         }
-        this.inventories.putAll(loadedInventories);
     }
 
     @Override
@@ -156,9 +221,12 @@ public class ZInventoriesPlayer implements InventoriesPlayer {
         new HashMap<>(this.inventories).forEach((uuid, inventoryPlayer) -> {
             Player player = Bukkit.getPlayer(uuid);
             if (player != null && player.isOnline()) {
-                inventoryPlayer.forceGiveInventory(player);
+                if (!ZInventory.restorePlayerInventoryBeforeExternalSave(this.plugin, player, "plugin-disable")) {
+                    this.forceGiveInventory(player);
+                }
+            } else {
+                this.inventories.remove(uuid);
             }
-            this.inventories.remove(uuid);
         });
     }
 }

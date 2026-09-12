@@ -85,6 +85,7 @@ import org.bukkit.plugin.ServicesManager;
 
 import java.io.File;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 /**
  * System to create your plugins very simply Projet with <a href="https://github.com/Maxlego08/TemplatePlugin">https://github.com/Maxlego08/TemplatePlugin</a>
@@ -271,7 +272,7 @@ public class ZMenuPlugin extends ZPlugin implements MenuPlugin {
         Bukkit.getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
 
         if (Configuration.enableAntiDupe) {
-            this.addListener(new DupeListener(this.dupeManager));
+            this.addListener(new DupeListener(this, this.dupeManager));
         }
 
         if (!this.isActive(Plugins.ZMENUPLUS)) {
@@ -382,6 +383,11 @@ public class ZMenuPlugin extends ZPlugin implements MenuPlugin {
 
         if (this.vinventoryManager != null) this.vinventoryManager.close();
         this.inventoriesPlayer.restoreAllInventories();
+        try {
+            this.storageManager.flushInventoryOperations().get(5, TimeUnit.SECONDS);
+        } catch (Exception error) {
+            this.getLogger().severe("Unable to flush zMenu inventory recovery operations: " + error.getMessage());
+        }
 
         Configuration.getInstance().save(this.getConfig(), this.configFile);
 

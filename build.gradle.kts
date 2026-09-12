@@ -108,6 +108,7 @@ allprojects {
     dependencies {
         if (project.name != "Paper" && project.name != "Common") {
             compileOnly(rootLibs.spigot.api)
+            testImplementation(rootLibs.spigot.api)
         }
         compileOnly(rootLibs.placeholderapi)
         compileOnly(rootLibs.reflections)

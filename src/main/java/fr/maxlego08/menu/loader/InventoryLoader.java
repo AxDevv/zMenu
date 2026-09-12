@@ -142,15 +142,15 @@ public class InventoryLoader extends ZUtils implements Loader<Inventory> {
 
         inventory.setType(inventoryType);
         inventory.setUpdateInterval(configuration.getInt(path + "update-interval", configuration.getInt(path + "updateInterval", 1000)));
-        inventory.setClearInventory(configuration.getBoolean(path + "clear-inventory", configuration.getBoolean(path + "clearInventory", false)));
+        boolean clearInventory = configuration.getBoolean(path + "clear-inventory", configuration.getBoolean(path + "clearInventory", false));
+        inventory.setClearInventory(clearInventory);
         inventory.setCancelItemPickup(configuration.getBoolean(path + "cancel-item-pickup", configuration.getBoolean(path + "cancelItemPickup", false)));
         inventory.setTargetPlayerNamePlaceholder(configuration.getString(path + "target-player-name-placeholder", configuration.getString(path + "target_player_name_placeholder", "%player_name%")));
         String clearInvTypeStr = configuration.getString("clear-inventory-type", "DEFAULT");
         try {
-            ClearInvType clearInvType = ClearInvType.valueOf(clearInvTypeStr.toUpperCase(Locale.ROOT));
-            if (clearInvType.hasRequiredPlugin() && !this.plugin.getServer().getPluginManager().isPluginEnabled(clearInvType.getRequiredPlugin())) {
-                clearInvType = ClearInvType.DEFAULT;
-            }
+            boolean packetEventsEnabled = this.plugin.getServer().getPluginManager().isPluginEnabled("packetevents");
+            String safeClearInvType = ClearInventoryTypePolicy.resolve(clearInvTypeStr, clearInventory, packetEventsEnabled);
+            ClearInvType clearInvType = ClearInvType.valueOf(safeClearInvType);
             inventory.setClearInvType(clearInvType);
         } catch (Exception e) {
             if (Configuration.enableDebug){
